@@ -83,3 +83,56 @@ class TestContactsSearch(unittest.TestCase):
         out = capture_with_responses(["--json", "contacts", "search", "AIHK"], [[CONTACT]])
         parsed = json.loads(out)
         self.assertEqual(parsed[0]["id"], 246)
+
+
+class TestContactsCreate(unittest.TestCase):
+    def _capture_create(self, extra_args, response=None):
+        captured = []
+        resp = response or {"id": 300, "name": "New Corp"}
+
+        def fake_request(self, method, path, params=None, body=None):
+            captured.append((method, path, body))
+            return resp
+
+        buf = io.StringIO()
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "create"] + extra_args), \
+             patch("sys.stdout", buf):
+            from bexio.cli import main
+            main()
+        return buf.getvalue(), captured
+
+    def test_posts_to_contact_endpoint(self):
+        _, captured = self._capture_create(["--name", "AIHK"])
+        self.assertEqual(captured[0][0], "POST")
+        self.assertIn("/contact", captured[0][1])
+
+    def test_name_in_body(self):
+        _, captured = self._capture_create(["--name", "AIHK"])
+        self.assertEqual(captured[0][2]["name"], "AIHK")
+
+    def test_person_fields_in_body(self):
+        _, captured = self._capture_create(["--firstname", "Anna", "--lastname", "Imperia", "--email", "anna@test.ch"])
+        body = captured[0][2]
+        self.assertEqual(body["firstname"], "Anna")
+        self.assertEqual(body["lastname"], "Imperia")
+        self.assertEqual(body["mail"], "anna@test.ch")
+
+    def test_prints_id_and_url(self):
+        out, _ = self._capture_create(["--name", "AIHK"])
+        self.assertIn("300", out)
+        self.assertIn("office.bexio.com", out)
+
+    def test_no_name_exits(self):
+        with self.assertRaises(SystemExit):
+            with patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "contacts", "create"]):
+                from bexio.cli import main
+                main()
+
+    def test_json_output(self):
+        out = capture_with_responses(["--json", "contacts", "create", "--name", "AIHK"],
+                                     [{"id": 300, "name": "New Corp"}])
+        parsed = json.loads(out)
+        self.assertEqual(parsed["id"], 300)

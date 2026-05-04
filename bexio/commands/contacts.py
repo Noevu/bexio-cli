@@ -17,6 +17,15 @@ def register(sub):
     search = s.add_parser("search", help="Search contacts by name")
     search.add_argument("query", type=str)
 
+    create = s.add_parser("create", help="Create a contact")
+    create.add_argument("--name", help="Company name")
+    create.add_argument("--firstname", help="First name (person)")
+    create.add_argument("--lastname", help="Last name (person)")
+    create.add_argument("--email", dest="mail")
+    create.add_argument("--phone", dest="phone_fixed")
+    create.add_argument("--type", dest="contact_type_id", type=int, default=1,
+                        help="1=company (default), 2=person")
+
     return p
 
 
@@ -27,8 +36,10 @@ def handle(args, client, json_flag):
         _show(args, client, json_flag)
     elif args.action == "search":
         _search(args, client, json_flag)
+    elif args.action == "create":
+        _create(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio contacts {list|show|search}")
+        sys.exit("Usage: bexio contacts {list|show|search|create}")
 
 
 def _list(args, client, json_flag):
@@ -55,6 +66,28 @@ def _show(args, client, json_flag):
     print(f"Email:   {c.get('mail', '—')}")
     print(f"Phone:   {c.get('phone_fixed', '—')}")
     print(f"URL:     https://office.bexio.com/index.php/contact/show/id/{c['id']}")
+
+
+def _create(args, client, json_flag):
+    body = {"contact_type_id": args.contact_type_id}
+    if args.name:
+        body["name"] = args.name
+    if args.firstname:
+        body["firstname"] = args.firstname
+    if args.lastname:
+        body["lastname"] = args.lastname
+    if args.mail:
+        body["mail"] = args.mail
+    if args.phone_fixed:
+        body["phone_fixed"] = args.phone_fixed
+    if not body.get("name") and not (body.get("firstname") or body.get("lastname")):
+        sys.exit("Provide --name (company) or --firstname/--lastname (person)")
+    result = client.post("/contact", body=body)
+    if json_flag:
+        print_json(result)
+        return
+    print(f"Contact #{result.get('id')} created")
+    print(f"  https://office.bexio.com/index.php/contact/show/id/{result.get('id')}")
 
 
 def _search(args, client, json_flag):
