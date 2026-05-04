@@ -1,5 +1,7 @@
 # bexio-cli + bexio-mcp
 
+🇩🇪 [Deutsche Version](README.de.md)
+
 A tool that lets you control your [Bexio](https://www.bexio.com) account from your computer's Terminal — without clicking through the browser. Also includes an MCP server so AI assistants like Claude can talk to Bexio directly in conversation.
 
 **What you can do with it:**
