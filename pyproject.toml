@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bexio-cli"
+version = "0.1.0"
+description = "Command-line interface for the Bexio API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["bexio", "cli", "invoicing", "accounting"]
+dependencies = [
+    "keyring>=25.0",
+]
+
+[project.scripts]
+bexio = "bexio.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/noevu/bexio-cli"
+Repository = "https://github.com/noevu/bexio-cli"
+Issues = "https://github.com/noevu/bexio-cli/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bexio"]
