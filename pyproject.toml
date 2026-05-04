@@ -14,8 +14,12 @@ dependencies = [
     "keyring>=25.0",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
 [project.scripts]
 bexio = "bexio.cli:main"
+bexio-mcp = "bexio.mcp_server:run"
 
 [project.urls]
 Homepage = "https://github.com/noevu/bexio-cli"
