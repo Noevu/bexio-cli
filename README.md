@@ -272,11 +272,19 @@ The AI figures out which Bexio actions to take and runs them for you.
 
 ### Installation with MCP support
 
+Run this one command — it installs bexio-cli and automatically configures every AI tool it finds on your computer:
+
+```
+curl -sSL https://raw.githubusercontent.com/noevu/bexio-cli/main/scripts/install_mcp.py | python3
+```
+
+Or install manually:
+
 ```
 pipx install "git+https://github.com/noevu/bexio-cli[mcp]"
 ```
 
-This installs the `bexio-mcp` command. Then connect it to your AI tool of choice:
+Then connect it to your AI tool of choice:
 
 ---
 
