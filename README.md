@@ -1,6 +1,6 @@
-# bexio-cli
+# bexio-cli + bexio-mcp
 
-A tool that lets you control your [Bexio](https://www.bexio.com) account from your computer's Terminal — without clicking through the browser. Great for repetitive tasks, batch operations, and automation.
+A tool that lets you control your [Bexio](https://www.bexio.com) account from your computer's Terminal — without clicking through the browser. Also includes an MCP server so AI assistants like Claude can talk to Bexio directly in conversation.
 
 **What you can do with it:**
 - Create invoices from all your recurring orders in one command
