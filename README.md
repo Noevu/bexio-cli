@@ -260,12 +260,15 @@ bexio invoices list --help
 
 ## Use with AI assistants (MCP)
 
-bexio-cli includes an MCP server, which lets AI assistants like Claude talk to your Bexio account directly. You can ask Claude things like:
+bexio-cli includes an MCP server, which lets AI assistants talk to your Bexio account directly in conversation — no commands to memorize, no clicking.
 
+You can say things like:
 - *"Show me all open invoices"*
 - *"Create invoices for all recurring orders"*
 - *"Log 2.5 hours on project 20 for today"*
 - *"Which bills are unpaid this month?"*
+
+The AI figures out which Bexio actions to take and runs them for you.
 
 ### Installation with MCP support
 
@@ -273,10 +276,13 @@ bexio-cli includes an MCP server, which lets AI assistants like Claude talk to y
 pipx install "git+https://github.com/noevu/bexio-cli[mcp]"
 ```
 
-### Connect to Claude Desktop
+This installs the `bexio-mcp` command. Then connect it to your AI tool of choice:
 
-Add this to your Claude Desktop config file:
+---
 
+### Claude Desktop
+
+Config file location:
 - **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
@@ -290,17 +296,53 @@ Add this to your Claude Desktop config file:
 }
 ```
 
-Restart Claude Desktop. You'll see a Bexio icon in the tools panel. Claude can now read and update your Bexio data in conversation.
+Restart Claude Desktop. Bexio tools appear automatically in the tools panel.
 
-### Connect to Claude Code (terminal)
+---
+
+### Claude Code (terminal)
 
 ```
 claude mcp add bexio -s user -- bexio-mcp
 ```
 
+---
+
+### Gemini CLI
+
+Config file: `~/.gemini/settings.json`
+
+```json
+{
+  "mcpServers": {
+    "bexio": {
+      "command": "bexio-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+---
+
+### Codex CLI (OpenAI)
+
+Config file: `~/.codex/config.toml`
+
+```toml
+[mcp_servers.bexio]
+type = "stdio"
+command = "bexio-mcp"
+args = []
+
+[mcp_servers.bexio.env]
+```
+
+---
+
 ### What the AI can do
 
-The MCP server exposes ~35 tools covering invoices, orders, quotes, contacts, payments, items, bills, projects, timesheets, reminders, and accounting reference data. Claude decides which tools to use based on your message — no commands to memorize.
+~35 tools covering invoices, orders, quotes, contacts, payments, items, bills, projects, timesheets, reminders, and accounting reference data. Works with any MCP-compatible AI assistant.
 
 ---
 
