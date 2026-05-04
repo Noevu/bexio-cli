@@ -6,7 +6,7 @@ import sys
 from bexio import __version__
 from bexio.auth import cmd_auth_login, cmd_auth_logout, cmd_auth_status, get_token
 from bexio.client import BexioClient
-from bexio.commands import accounts, contacts, countries, currencies, invoices, lookup, orders, payment_types, quotes, taxes
+from bexio.commands import accounts, bills, contacts, countries, currencies, invoices, items, lookup, orders, payment_types, payments, projects, quotes, reminders, taxes, timesheets
 
 
 def main() -> None:
@@ -27,6 +27,9 @@ def main() -> None:
     auth_sub.add_parser("status", help="Show auth status")
 
     # resource commands
+    bills.register(sub)
+    items.register(sub)
+    payments.register(sub)
     orders.register(sub)
     invoices.register(sub)
     contacts.register(sub)
@@ -39,6 +42,11 @@ def main() -> None:
     payment_types.register(sub)
     taxes.register_taxes(sub)
     taxes.register_vat_periods(sub)
+    timesheets.register(sub)
+    projects.register(sub)
+    projects.register_milestones(sub)
+    projects.register_work_packages(sub)
+    reminders.register(sub)
 
     args = parser.parse_args()
 
@@ -63,7 +71,13 @@ def main() -> None:
     client = BexioClient(get_token())
     json_flag = args.json
 
-    if args.resource == "orders":
+    if args.resource == "bills":
+        bills.handle(args, client, json_flag)
+    elif args.resource == "items":
+        items.handle(args, client, json_flag)
+    elif args.resource == "payments":
+        payments.handle(args, client, json_flag)
+    elif args.resource == "orders":
         orders.handle(args, client, json_flag)
     elif args.resource == "invoices":
         invoices.handle(args, client, json_flag)
@@ -87,6 +101,16 @@ def main() -> None:
         taxes.handle_taxes(args, client, json_flag)
     elif args.resource == "vat-periods":
         taxes.handle_vat_periods(args, client, json_flag)
+    elif args.resource == "timesheets":
+        timesheets.handle(args, client, json_flag)
+    elif args.resource == "projects":
+        projects.handle(args, client, json_flag)
+    elif args.resource == "milestones":
+        projects.handle_milestones(args, client, json_flag)
+    elif args.resource == "work-packages":
+        projects.handle_work_packages(args, client, json_flag)
+    elif args.resource == "reminders":
+        reminders.handle(args, client, json_flag)
     else:
         parser.print_help()
         sys.exit(1)

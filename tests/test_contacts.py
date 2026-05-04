@@ -136,3 +136,72 @@ class TestContactsCreate(unittest.TestCase):
                                      [{"id": 300, "name": "New Corp"}])
         parsed = json.loads(out)
         self.assertEqual(parsed["id"], 300)
+
+
+class TestContactsEdit(unittest.TestCase):
+    def test_prints_confirmation(self):
+        out = capture_with_responses(["contacts", "edit", "246", "--name", "New Name"], [{"id": 246}])
+        self.assertIn("updated", out)
+        self.assertIn("246", out)
+
+    def test_puts_correct_endpoint(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return {"id": 246}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "edit", "246", "--name", "New Name"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        method, path, body = captured[0]
+        self.assertEqual(method, "PUT")
+        self.assertIn("/contact/246", path)
+
+    def test_sends_only_provided_fields(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return {"id": 246}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "edit", "246", "--email", "new@test.ch"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        body = captured[0][2]
+        self.assertIn("mail", body)
+        self.assertEqual(body["mail"], "new@test.ch")
+        self.assertNotIn("name", body)
+        self.assertNotIn("firstname", body)
+        self.assertNotIn("phone_fixed", body)
+
+
+class TestContactsDelete(unittest.TestCase):
+    def test_prints_confirmation(self):
+        out = capture_with_responses(["contacts", "delete", "246"], [{"success": True}])
+        self.assertIn("deleted", out)
+        self.assertIn("246", out)
+
+    def test_deletes_correct_endpoint(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path))
+            return {"success": True}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "delete", "246"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        self.assertIn(("DELETE", "/contact/246"), captured)

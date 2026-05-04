@@ -26,6 +26,17 @@ def register(sub):
     create.add_argument("--type", dest="contact_type_id", type=int, default=1,
                         help="1=company (default), 2=person")
 
+    edit = s.add_parser("edit", help="Edit a contact")
+    edit.add_argument("id", type=int)
+    edit.add_argument("--name", help="Company name")
+    edit.add_argument("--firstname", help="First name")
+    edit.add_argument("--lastname", help="Last name")
+    edit.add_argument("--email", dest="mail")
+    edit.add_argument("--phone", dest="phone_fixed")
+
+    delete = s.add_parser("delete", help="Delete a contact")
+    delete.add_argument("id", type=int)
+
     return p
 
 
@@ -38,8 +49,12 @@ def handle(args, client, json_flag):
         _search(args, client, json_flag)
     elif args.action == "create":
         _create(args, client, json_flag)
+    elif args.action == "edit":
+        _edit(args, client, json_flag)
+    elif args.action == "delete":
+        _delete(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio contacts {list|show|search|create}")
+        sys.exit("Usage: bexio contacts {list|show|search|create|edit|delete}")
 
 
 def _list(args, client, json_flag):
@@ -105,3 +120,27 @@ def _search(args, client, json_flag):
     for c in results:
         name = c.get("name", "") or f"{c.get('firstname', '')} {c.get('lastname', '')}".strip()
         print(f"{c['id']:>5}  {name[:40]:<40}  {c.get('mail', '')}")
+
+
+def _edit(args, client, json_flag):
+    body = {}
+    if args.name is not None:
+        body["name"] = args.name
+    if args.firstname is not None:
+        body["firstname"] = args.firstname
+    if args.lastname is not None:
+        body["lastname"] = args.lastname
+    if args.mail is not None:
+        body["mail"] = args.mail
+    if args.phone_fixed is not None:
+        body["phone_fixed"] = args.phone_fixed
+    result = client.put(f"/contact/{args.id}", body=body)
+    if json_flag:
+        print_json(result)
+        return
+    print(f"Contact {args.id} updated.")
+
+
+def _delete(args, client, json_flag):
+    client.delete(f"/contact/{args.id}")
+    print(f"Contact {args.id} deleted.")

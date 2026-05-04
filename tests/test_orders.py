@@ -2,7 +2,9 @@
 
 import io
 import json
+import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -101,3 +103,119 @@ class TestOrdersCreateInvoice(unittest.TestCase):
         out = capture_with_responses(["--json", "orders", "create-invoice", "47"], [INVOICE_CREATED])
         parsed = json.loads(out)
         self.assertEqual(parsed["id"], 123)
+
+
+class TestOrdersSearch(unittest.TestCase):
+    def test_shows_matching_order(self):
+        out = capture_with_responses(["orders", "search", "Hosting"], [[ORDER]])
+        self.assertIn("Hosting & Seed Service Paket", out)
+
+    def test_posts_search_body(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return [ORDER]
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "orders", "search", "Hosting"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        method, path, body = captured[0]
+        self.assertEqual(method, "POST")
+        self.assertIn("kb_order/search", path)
+        self.assertEqual(body[0]["field"], "name")
+        self.assertEqual(body[0]["value"], "Hosting")
+        self.assertEqual(body[0]["criteria"], "like")
+
+    def test_empty_results(self):
+        out = capture_with_responses(["orders", "search", "zzz"], [[]])
+        self.assertIn("No orders", out)
+
+
+class TestOrdersDelete(unittest.TestCase):
+    def test_prints_confirmation(self):
+        out = capture_with_responses(["orders", "delete", "47"], [{"success": True}])
+        self.assertIn("deleted", out)
+        self.assertIn("47", out)
+
+    def test_deletes_correct_endpoint(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path))
+            return {"success": True}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "orders", "delete", "47"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        self.assertIn(("DELETE", "/kb_order/47"), captured)
+
+
+class TestOrdersPdf(unittest.TestCase):
+    def test_saves_file(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            tmp = f.name
+        os.unlink(tmp)
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            return b"FAKEPDF"
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "orders", "pdf", "47", "--output", tmp]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        self.assertTrue(os.path.exists(tmp))
+        with open(tmp, "rb") as f:
+            self.assertEqual(f.read(), b"FAKEPDF")
+        os.unlink(tmp)
+
+    def test_default_filename(self):
+        default_file = "order_47.pdf"
+        if os.path.exists(default_file):
+            os.unlink(default_file)
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            return b"FAKEPDF"
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "orders", "pdf", "47"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        self.assertTrue(os.path.exists(default_file))
+        os.unlink(default_file)
+
+    def test_custom_output_flag(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            tmp = f.name
+        os.unlink(tmp)
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            return b"FAKEPDF"
+
+        buf = io.StringIO()
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "orders", "pdf", "47", "--output", tmp]), \
+             patch("sys.stdout", buf):
+            from bexio.cli import main
+            main()
+
+        out = buf.getvalue()
+        self.assertIn("Saved to", out)
+        self.assertIn(tmp, out)
+        if os.path.exists(tmp):
+            os.unlink(tmp)

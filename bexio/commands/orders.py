@@ -20,6 +20,16 @@ def register(sub):
     create_inv = s.add_parser("create-invoice", help="Create invoice from order")
     create_inv.add_argument("id", type=int, help="Order ID")
 
+    search = s.add_parser("search", help="Search orders by name")
+    search.add_argument("query", type=str)
+
+    delete = s.add_parser("delete", help="Delete order")
+    delete.add_argument("id", type=int)
+
+    pdf = s.add_parser("pdf", help="Download order PDF")
+    pdf.add_argument("id", type=int)
+    pdf.add_argument("--output", "-o", help="Output filename")
+
     return p
 
 
@@ -30,8 +40,14 @@ def handle(args, client, json_flag):
         _show(args, client, json_flag)
     elif args.action == "create-invoice":
         _create_invoice(args, client, json_flag)
+    elif args.action == "search":
+        _search(args, client, json_flag)
+    elif args.action == "delete":
+        _delete(args, client, json_flag)
+    elif args.action == "pdf":
+        _pdf(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio orders {list|show|create-invoice}")
+        sys.exit("Usage: bexio orders {list|show|create-invoice|search|delete|pdf}")
 
 
 def _list(args, client, json_flag):
@@ -74,3 +90,34 @@ def _create_invoice(args, client, json_flag):
     inv_id = result.get("id")
     print(f"Invoice #{inv_id} ({result.get('document_nr', '—')}) created")
     print(f"  https://office.bexio.com/index.php/kb_invoice/show/id/{inv_id}")
+
+
+def _search(args, client, json_flag):
+    results = client.post("/kb_order/search", body=[
+        {"field": "name", "value": args.query, "criteria": "like"}
+    ])
+    if not isinstance(results, list):
+        sys.exit(f"Unexpected response: {results}")
+    if json_flag:
+        print_json(results)
+        return
+    if not results:
+        print("No orders found.")
+        return
+    for o in results:
+        status = KB_ITEM_STATUS.get(o.get("kb_item_status_id"), "")
+        rec = " [recurring]" if o.get("is_recurring") else ""
+        print(f"{o['id']:>4}  {o['document_nr']:<20}  {o['title'][:48]:<48}  {status}{rec}")
+
+
+def _delete(args, client, json_flag):
+    client.delete(f"/kb_order/{args.id}")
+    print(f"Order {args.id} deleted.")
+
+
+def _pdf(args, client, json_flag):
+    data = client.get_pdf(f"/kb_order/{args.id}/pdf")
+    filename = args.output or f"order_{args.id}.pdf"
+    with open(filename, "wb") as f:
+        f.write(data)
+    print(f"Saved to {filename}")

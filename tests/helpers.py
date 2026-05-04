@@ -45,7 +45,7 @@ def capture_with_responses(argv: list[str], responses) -> str:
         responses = [responses]
     call_count = [0]
 
-    def fake_request(self, method, path, params=None, body=None, base=None):
+    def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
         result = responses[call_count[0] % len(responses)]
         call_count[0] += 1
         return result

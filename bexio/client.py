@@ -20,16 +20,31 @@ class BexioClient:
     def get_v3(self, path: str, params: dict | None = None) -> Any:
         return self._request("GET", path, params=params, base="https://api.bexio.com/3.0")
 
+    def get_v4(self, path: str, params: dict | None = None) -> Any:
+        return self._request("GET", path, params=params, base="https://api.bexio.com/4.0")
+
+    def get_pdf(self, path: str) -> bytes:
+        return self._request("GET", path, accept="application/pdf")
+
     def post(self, path: str, body: dict | None = None) -> Any:
         return self._request("POST", path, body=body)
+
+    def post_v4(self, path: str, body: dict | None = None) -> Any:
+        return self._request("POST", path, body=body, base="https://api.bexio.com/4.0")
 
     def put(self, path: str, body: dict | None = None) -> Any:
         return self._request("PUT", path, body=body)
 
+    def put_v4(self, path: str, body: dict | None = None) -> Any:
+        return self._request("PUT", path, body=body, base="https://api.bexio.com/4.0")
+
     def delete(self, path: str) -> Any:
         return self._request("DELETE", path)
 
-    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None) -> Any:
+    def delete_v4(self, path: str) -> Any:
+        return self._request("DELETE", path, base="https://api.bexio.com/4.0")
+
+    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None, accept: str = "application/json") -> Any:
         url = (base or BASE_URL) + path
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
@@ -40,13 +55,15 @@ class BexioClient:
             method=method,
             headers={
                 "Authorization": f"Bearer {self._token}",
-                "Accept": "application/json",
+                "Accept": accept,
                 "Content-Type": "application/json",
             },
         )
         try:
             with urllib.request.urlopen(req) as resp:
                 raw = resp.read()
+                if accept == "application/pdf":
+                    return raw
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
             msg = e.read().decode(errors="replace")

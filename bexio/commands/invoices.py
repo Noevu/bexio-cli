@@ -30,6 +30,22 @@ def register(sub):
     issue = s.add_parser("issue", help="Issue (finalize) invoice")
     issue.add_argument("id", type=int)
 
+    search = s.add_parser("search", help="Search invoices by title")
+    search.add_argument("query", type=str)
+
+    delete = s.add_parser("delete", help="Delete invoice")
+    delete.add_argument("id", type=int)
+
+    copy = s.add_parser("copy", help="Copy invoice")
+    copy.add_argument("id", type=int)
+
+    pdf = s.add_parser("pdf", help="Download invoice PDF")
+    pdf.add_argument("id", type=int)
+    pdf.add_argument("--output", "-o", help="Output filename")
+
+    revert_issue = s.add_parser("revert-issue", help="Revert invoice to draft")
+    revert_issue.add_argument("id", type=int)
+
     return p
 
 
@@ -46,8 +62,18 @@ def handle(args, client, json_flag):
         _action(args, client, json_flag, f"/kb_invoice/{args.id}/cancel", "cancelled")
     elif args.action == "issue":
         _action(args, client, json_flag, f"/kb_invoice/{args.id}/issue", "issued")
+    elif args.action == "search":
+        _search(args, client, json_flag)
+    elif args.action == "delete":
+        _delete(args, client, json_flag)
+    elif args.action == "copy":
+        _copy(args, client, json_flag)
+    elif args.action == "pdf":
+        _pdf(args, client, json_flag)
+    elif args.action == "revert-issue":
+        _revert_issue(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio invoices {list|show|send|mark-sent|cancel|issue}")
+        sys.exit("Usage: bexio invoices {list|show|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
 
 
 def _list(args, client, json_flag):
@@ -90,3 +116,49 @@ def _action(args, client, json_flag, path, verb):
         print_json(result)
         return
     print(f"Invoice {args.id} {verb}.")
+
+
+def _search(args, client, json_flag):
+    results = client.post("/kb_invoice/search", body=[
+        {"field": "title", "value": args.query, "criteria": "like"}
+    ])
+    if not isinstance(results, list):
+        sys.exit(f"Unexpected response: {results}")
+    if json_flag:
+        print_json(results)
+        return
+    if not results:
+        print("No invoices found.")
+        return
+    for inv in results:
+        status = STATUS_LABELS.get(inv.get("kb_item_status_id"), str(inv.get("kb_item_status_id")))
+        total = f"CHF {float(inv.get('total', 0)):.2f}"
+        date = (inv.get("is_valid_from") or "")[:10]
+        title = (inv.get("title") or "")[:36]
+        print(f"{inv['id']:>5}  {inv['document_nr']:<18}  {date:<10}  {total:>11}  {status:<10}  {title}")
+
+
+def _delete(args, client, json_flag):
+    client.delete(f"/kb_invoice/{args.id}")
+    print(f"Invoice {args.id} deleted.")
+
+
+def _copy(args, client, json_flag):
+    result = client.post(f"/kb_invoice/{args.id}/copy")
+    if json_flag:
+        print_json(result)
+        return
+    print(f"Invoice {result['id']} created.")
+
+
+def _pdf(args, client, json_flag):
+    data = client.get_pdf(f"/kb_invoice/{args.id}/pdf")
+    filename = args.output or f"invoice_{args.id}.pdf"
+    with open(filename, "wb") as f:
+        f.write(data)
+    print(f"Saved to {filename}")
+
+
+def _revert_issue(args, client, json_flag):
+    client.post(f"/kb_invoice/{args.id}/revert_issue")
+    print(f"Invoice {args.id} reverted to draft.")
