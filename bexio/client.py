@@ -17,6 +17,9 @@ class BexioClient:
     def get(self, path: str, params: dict | None = None) -> Any:
         return self._request("GET", path, params=params)
 
+    def get_v3(self, path: str, params: dict | None = None) -> Any:
+        return self._request("GET", path, params=params, base="https://api.bexio.com/3.0")
+
     def post(self, path: str, body: dict | None = None) -> Any:
         return self._request("POST", path, body=body)
 
@@ -26,8 +29,8 @@ class BexioClient:
     def delete(self, path: str) -> Any:
         return self._request("DELETE", path)
 
-    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None) -> Any:
-        url = BASE_URL + path
+    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None) -> Any:
+        url = (base or BASE_URL) + path
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         data = json.dumps(body).encode() if body is not None else None

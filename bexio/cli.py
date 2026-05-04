@@ -6,7 +6,7 @@ import sys
 from bexio import __version__
 from bexio.auth import cmd_auth_login, cmd_auth_logout, cmd_auth_status, get_token
 from bexio.client import BexioClient
-from bexio.commands import contacts, invoices, orders, quotes
+from bexio.commands import accounts, contacts, countries, currencies, invoices, lookup, orders, payment_types, quotes, taxes
 
 
 def main() -> None:
@@ -31,6 +31,14 @@ def main() -> None:
     invoices.register(sub)
     contacts.register(sub)
     quotes.register(sub)
+    countries.register(sub)
+    currencies.register(sub)
+    lookup.register(sub)
+    accounts.register(sub)
+    accounts.register_groups(sub)
+    payment_types.register(sub)
+    taxes.register_taxes(sub)
+    taxes.register_vat_periods(sub)
 
     args = parser.parse_args()
 
@@ -63,6 +71,22 @@ def main() -> None:
         contacts.handle(args, client, json_flag)
     elif args.resource == "quotes":
         quotes.handle(args, client, json_flag)
+    elif args.resource == "countries":
+        countries.handle(args, client, json_flag)
+    elif args.resource == "currencies":
+        currencies.handle(args, client, json_flag)
+    elif args.resource in ("languages", "contact-groups", "business-activities"):
+        lookup.handle(args, client, json_flag)
+    elif args.resource == "accounts":
+        accounts.handle(args, client, json_flag)
+    elif args.resource == "account-groups":
+        accounts.handle_groups(args, client, json_flag)
+    elif args.resource == "payment-types":
+        payment_types.handle(args, client, json_flag)
+    elif args.resource == "taxes":
+        taxes.handle_taxes(args, client, json_flag)
+    elif args.resource == "vat-periods":
+        taxes.handle_vat_periods(args, client, json_flag)
     else:
         parser.print_help()
         sys.exit(1)
