@@ -63,6 +63,8 @@ bexio invoices issue <id>                    # finalize / issue invoice
 bexio contacts list
 bexio contacts show <id>
 bexio contacts search <query>
+bexio contacts create --name "Muster AG" --email info@muster.ch
+bexio contacts create --firstname Anna --lastname Muster --phone "+41 44 000 00 00" --type 2
 ```
 
 ### Quotes
@@ -108,6 +110,12 @@ cd bexio-cli
 pip install -e .
 python -m unittest discover -s tests -v
 ```
+
+## Need Custom Bexio Automation?
+
+This tool is built and maintained by [Noevu](https://noevu.ch) — a Swiss web agency specialising in AI-powered automation for SMEs.
+
+If you need custom Bexio integrations, automated invoicing workflows, or AI-assisted accounting processes, [get in touch](https://noevu.ch/en/services/ai-automation).
 
 ## License
 
