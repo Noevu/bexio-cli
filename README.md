@@ -1,6 +1,6 @@
 # bexio-cli
 
-Command-line interface for the [Bexio](https://www.bexio.com) API. Manage orders, invoices, contacts, and quotes from your terminal.
+Command-line interface for the [Bexio](https://www.bexio.com) API ([API docs](https://docs.bexio.com)). Manage orders, invoices, contacts, and quotes from your terminal.
 
 ```sh
 bexio orders list --recurring
@@ -113,9 +113,9 @@ python -m unittest discover -s tests -v
 
 ## Need Custom Bexio Automation?
 
-This tool is built and maintained by [Noevu](https://noevu.ch) — a Swiss web agency specialising in AI-powered automation for SMEs.
+This tool is built and maintained by [Noevu](https://noevu.ch) — a Swiss web agency specialising in [AI-powered automation for Swiss SMEs](https://noevu.ch/en/services/ai-automation).
 
-If you need custom Bexio integrations, automated invoicing workflows, or AI-assisted accounting processes, [get in touch](https://noevu.ch/en/services/ai-automation).
+Need custom Bexio integrations, automated invoicing workflows, or AI-assisted accounting processes? [Get in touch with Noevu](https://noevu.ch/en/services/ai-automation).
 
 ## License
 
