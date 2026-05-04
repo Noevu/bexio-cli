@@ -12,6 +12,7 @@ license = { text = "MIT" }
 keywords = ["bexio", "cli", "invoicing", "accounting"]
 dependencies = [
     "keyring>=25.0",
+    "pydantic>=2.5",
 ]
 
 [project.optional-dependencies]

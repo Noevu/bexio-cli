@@ -110,6 +110,7 @@ bexio invoices list --status open        show only open (unpaid) invoices
 bexio invoices list --status draft       show only drafts
 bexio invoices show 47                   show full details of invoice 47
 bexio invoices search "Muster AG"        find invoices by name
+bexio invoices create --file body.json   create an invoice from a JSON body
 bexio invoices pdf 47                    download invoice 47 as PDF
 bexio invoices send 47                   send invoice 47 by email
 bexio invoices issue 47                  finalize invoice 47
@@ -126,10 +127,24 @@ bexio orders list                        show all orders
 bexio orders list --recurring            show only recurring orders
 bexio orders show 23                     show full details of order 23
 bexio orders search "Hosting"            find orders by name
+bexio orders create --file body.json     create an order from a JSON body
 bexio orders create-invoice 23           create an invoice from order 23
+bexio orders set-repetition 23 \         set monthly recurrence on order 23
+  --start 2026-06-01 --type monthly --schedule fixed_day
+bexio orders unset-repetition 23         remove recurrence from order 23
 bexio orders pdf 23                      download order 23 as PDF
 bexio orders delete 23                   delete order 23
 ```
+
+`orders create` reads the JSON body from `--file path.json` (or `--file -` for stdin)
+and validates it against a Pydantic schema before sending. Invalid payloads (missing
+fields, `**markdown**` in HTML text, unknown position types, the `show_position_nr`
+field that the API rejects) fail fast with a field-path error.
+
+`orders set-repetition` accepts either explicit flags (`--start`, `--end`, `--type`,
+`--interval`, `--schedule`, `--weekdays`) or `--file body.json`. `--schedule` is
+required for `--type monthly` and accepts `fixed_day`, `week_day`, `first_day`, or
+`last_day`. `--weekdays` is required for `--type weekly` (e.g. `monday,wednesday`).
 
 ### Quotes (Offerten)
 
@@ -356,6 +371,67 @@ args = []
 
 ---
 
+## Use as a Python library
+
+The CLI is also a typed Python library. Pydantic v2 models validate every payload
+before it leaves your process — same validation as the CLI:
+
+```python
+from bexio import Client, KbOrder, KbPositionCustom, OrderRepetition
+
+order = KbOrder(
+    contact_id=269, user_id=1,
+    title="Service-Paket — example.com",
+    header="Hallo Andreas<br /><br />Hier dein laufender Auftrag.",
+    positions=[
+        KbPositionCustom(
+            text="<strong>Grow Service Paket</strong><br />Monthly service",
+            unit_price="349.00", amount="1", unit_id=3, tax_id=52,
+        ),
+    ],
+)
+
+client = Client(token="...")
+result = client.post("/kb_order", body=order.model_dump(mode="json", exclude_none=True))
+order_id = result["id"]
+
+repetition = OrderRepetition.model_validate({
+    "start": "2026-06-01", "end": None,
+    "repetition": {"type": "monthly", "interval": 1, "schedule": "fixed_day"},
+})
+client.post(f"/kb_order/{order_id}/repetition",
+            body=repetition.model_dump(mode="json"))
+```
+
+Available models: `KbOrder`, `KbInvoice`, `OrderRepetition`, `KbPositionCustom`,
+`KbPositionDiscount`, `KbPositionItem`, `KbPositionText`, `KbPositionSubtotal`,
+`KbPositionPagebreak`, `KbPositionSubposition`. Type aliases: `Position` (the
+discriminated union), `RepetitionSpec`, `OrderRepetitionType`, `MonthlySchedule`,
+`Weekday`.
+
+## Body quirks (Bexio API)
+
+Things the API silently rejects or surprises you with — already enforced by the
+Pydantic models, but worth knowing when authoring JSON bodies by hand:
+
+- **Text fields are HTML, not Markdown.** `header`, `footer`, and position `text`
+  on orders/invoices/quotes render as HTML in the PDF. `**bold**` shows up
+  literal — use `<strong>...</strong>` and `<br />`. Umlauts as HTML entities
+  (`&uuml;`, `&ouml;`, `&auml;`).
+- **`show_position_nr` is rejected on `kb_order` POST** (works on `kb_invoice`).
+  The `KbOrder` model omits the field; the API returns 422 if you sneak it in.
+- **Repetition `schedule` is monthly-only.** Sending `schedule` with `type=daily`,
+  `weekly`, or `yearly` returns "Diese Eingabe ist nicht korrekt." Valid values
+  for monthly: `fixed_day`, `week_day`, `first_day`, `last_day`.
+- **`is_recurring` only flips to `true`** after `POST /kb_order/{id}/repetition`
+  succeeds — not by setting it on the order create payload.
+- **Recurring orders cannot be deleted** while `is_recurring=true`. Bexio returns
+  `403 Forbidden`. Remove the recurrence first with
+  `bexio orders unset-repetition <id>` (or `DELETE /kb_order/{id}/repetition`),
+  then `bexio orders delete <id>`.
+- **Invoice generation mode** for recurring orders (draft vs. auto-send) is
+  configured in the Bexio web UI, not via the API.
+
 ## For developers
 
 Full command reference, contribution guide, and scripting examples:
@@ -367,7 +443,8 @@ pip install -e .
 python -m unittest discover -s tests -v
 ```
 
-The tool is pure Python (stdlib + `keyring`), no external HTTP libraries required.
+The tool is pure Python (stdlib + `keyring` + `pydantic`), no external HTTP
+libraries required.
 
 ---
 

@@ -219,3 +219,186 @@ class TestOrdersPdf(unittest.TestCase):
         self.assertIn(tmp, out)
         if os.path.exists(tmp):
             os.unlink(tmp)
+
+
+# ─── orders create / set-repetition ─────────────────────────────────────
+
+CREATED_ORDER = {
+    "id": 50,
+    "document_nr": "0050-000223",
+    "title": "Grow Service Paket",
+}
+
+VALID_ORDER_BODY = {
+    "contact_id": 269,
+    "user_id": 1,
+    "title": "Grow Service Paket",
+    "positions": [
+        {"type": "KbPositionCustom",
+         "text": "<strong>Grow</strong><br />Monthly service",
+         "unit_price": "349.00", "amount": "1"},
+    ],
+}
+
+
+class TestOrdersCreate(unittest.TestCase):
+    def test_creates_from_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(VALID_ORDER_BODY, f)
+            tmp = f.name
+        try:
+            out = capture_with_responses(["orders", "create", "--file", tmp], [CREATED_ORDER])
+            self.assertIn("50", out)
+            self.assertIn("0050-000223", out)
+            self.assertIn("office.bexio.com/index.php/kb_order/show/id/50", out)
+        finally:
+            os.unlink(tmp)
+
+    def test_rejects_markdown_in_header(self):
+        bad = dict(VALID_ORDER_BODY, header="Hallo **Andreas**")
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(bad, f)
+            tmp = f.name
+        try:
+            with patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "orders", "create", "--file", tmp]), \
+                 patch("sys.stdout", io.StringIO()):
+                from bexio.cli import main
+                with self.assertRaises(SystemExit) as cm:
+                    main()
+            self.assertIn("HTML, not Markdown", str(cm.exception))
+        finally:
+            os.unlink(tmp)
+
+    def test_rejects_show_position_nr(self):
+        bad = dict(VALID_ORDER_BODY, show_position_nr=True)
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(bad, f)
+            tmp = f.name
+        try:
+            with patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "orders", "create", "--file", tmp]), \
+                 patch("sys.stdout", io.StringIO()):
+                from bexio.cli import main
+                with self.assertRaises(SystemExit) as cm:
+                    main()
+            self.assertIn("show_position_nr", str(cm.exception))
+        finally:
+            os.unlink(tmp)
+
+
+class TestOrdersSetRepetition(unittest.TestCase):
+    def test_explicit_flags_monthly(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return {"start": "2026-06-01",
+                    "repetition": {"type": "monthly", "interval": 1, "schedule": "fixed_day"}}
+
+        argv = ["bexio", "orders", "set-repetition", "50",
+                "--start", "2026-06-01",
+                "--type", "monthly", "--schedule", "fixed_day"]
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", argv), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        method, path, body = captured[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/kb_order/50/repetition")
+        self.assertEqual(body["start"], "2026-06-01")
+        self.assertEqual(body["repetition"]["type"], "monthly")
+        self.assertEqual(body["repetition"]["schedule"], "fixed_day")
+
+    def test_monthly_without_schedule_fails(self):
+        argv = ["bexio", "orders", "set-repetition", "50",
+                "--start", "2026-06-01", "--type", "monthly"]
+        with patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", argv), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            with self.assertRaises(SystemExit) as cm:
+                main()
+        self.assertIn("--schedule", str(cm.exception))
+
+    def test_weekly_with_weekdays(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append(body)
+            return {"start": "2026-06-01",
+                    "repetition": {"type": "weekly", "interval": 1,
+                                   "weekdays": ["monday", "wednesday"]}}
+
+        argv = ["bexio", "orders", "set-repetition", "50",
+                "--start", "2026-06-01",
+                "--type", "weekly", "--weekdays", "monday,wednesday"]
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", argv), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        self.assertEqual(captured[0]["repetition"]["weekdays"], ["monday", "wednesday"])
+
+    def test_from_file(self):
+        body = {"start": "2026-06-01", "end": None,
+                "repetition": {"type": "monthly", "interval": 1, "schedule": "fixed_day"}}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(body, f)
+            tmp = f.name
+        try:
+            captured = []
+
+            def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+                captured.append((method, path, body))
+                return {"start": "2026-06-01",
+                        "repetition": {"type": "monthly", "interval": 1, "schedule": "fixed_day"}}
+
+            argv = ["bexio", "orders", "set-repetition", "50", "--file", tmp]
+            with patch("bexio.client.BexioClient._request", fake_request), \
+                 patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", argv), \
+                 patch("sys.stdout", io.StringIO()):
+                from bexio.cli import main
+                main()
+
+            self.assertEqual(captured[0][1], "/kb_order/50/repetition")
+            self.assertEqual(captured[0][2]["repetition"]["schedule"], "fixed_day")
+        finally:
+            os.unlink(tmp)
+
+
+class TestOrdersUnsetRepetition(unittest.TestCase):
+    def test_calls_delete_endpoint(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path))
+            return {"success": True}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "orders", "unset-repetition", "52"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        self.assertEqual(captured, [("DELETE", "/kb_order/52/repetition")])
+
+    def test_human_output(self):
+        out = capture_with_responses(
+            ["orders", "unset-repetition", "52"], [{"success": True}]
+        )
+        self.assertIn("Order 52 recurrence removed", out)
+
+    def test_json_output(self):
+        out = capture_with_responses(
+            ["--json", "orders", "unset-repetition", "52"], [{"success": True}]
+        )
+        parsed = json.loads(out)
+        self.assertTrue(parsed["success"])

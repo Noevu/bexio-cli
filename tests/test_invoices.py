@@ -287,3 +287,69 @@ class TestInvoicesRevertIssue(unittest.TestCase):
             main()
 
         self.assertIn(("POST", "/kb_invoice/123/revert_issue"), captured)
+
+
+# ─── invoices create ────────────────────────────────────────────────────
+
+import json as _json
+import os as _os
+import tempfile as _tempfile
+
+CREATED_INV = {"id": 200, "document_nr": "RE-00200", "title": "Test Invoice"}
+VALID_INVOICE_BODY = {
+    "contact_id": 269,
+    "user_id": 1,
+    "title": "Test Invoice",
+    "is_valid_from": "2026-05-04",
+    "positions": [
+        {"type": "KbPositionCustom",
+         "text": "<strong>Item</strong><br />Desc",
+         "unit_price": "100.00", "amount": "1"},
+    ],
+}
+
+
+class TestInvoicesCreate(unittest.TestCase):
+    def test_creates_from_file(self):
+        with _tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            _json.dump(VALID_INVOICE_BODY, f)
+            tmp = f.name
+        try:
+            out = capture_with_responses(["invoices", "create", "--file", tmp], [CREATED_INV])
+            self.assertIn("200", out)
+            self.assertIn("RE-00200", out)
+            self.assertIn("kb_invoice/show/id/200", out)
+        finally:
+            _os.unlink(tmp)
+
+    def test_rejects_markdown_in_header(self):
+        bad = dict(VALID_INVOICE_BODY, header="**Bold**")
+        with _tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            _json.dump(bad, f)
+            tmp = f.name
+        try:
+            with patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "invoices", "create", "--file", tmp]), \
+                 patch("sys.stdout", io.StringIO()):
+                from bexio.cli import main
+                with self.assertRaises(SystemExit) as cm:
+                    main()
+            self.assertIn("HTML, not Markdown", str(cm.exception))
+        finally:
+            _os.unlink(tmp)
+
+    def test_missing_is_valid_from(self):
+        bad = {k: v for k, v in VALID_INVOICE_BODY.items() if k != "is_valid_from"}
+        with _tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            _json.dump(bad, f)
+            tmp = f.name
+        try:
+            with patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "invoices", "create", "--file", tmp]), \
+                 patch("sys.stdout", io.StringIO()):
+                from bexio.cli import main
+                with self.assertRaises(SystemExit) as cm:
+                    main()
+            self.assertIn("is_valid_from", str(cm.exception))
+        finally:
+            _os.unlink(tmp)

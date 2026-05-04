@@ -1,6 +1,8 @@
 """Invoice commands."""
 
+import json
 import sys
+from bexio.models import KbInvoice
 from bexio.output import print_json
 
 STATUS_MAP = {"draft": 1, "open": 7, "partial": 8, "paid": 9, "cancelled": 16}
@@ -17,6 +19,10 @@ def register(sub):
 
     show = s.add_parser("show", help="Show invoice")
     show.add_argument("id", type=int)
+
+    create = s.add_parser("create", help="Create an invoice from a JSON body")
+    create.add_argument("--file", "-f", required=True,
+                        help="Path to JSON body file, or '-' to read stdin")
 
     send = s.add_parser("send", help="Send invoice by email")
     send.add_argument("id", type=int)
@@ -54,6 +60,8 @@ def handle(args, client, json_flag):
         _list(args, client, json_flag)
     elif args.action == "show":
         _show(args, client, json_flag)
+    elif args.action == "create":
+        _create(args, client, json_flag)
     elif args.action == "send":
         _action(args, client, json_flag, f"/kb_invoice/{args.id}/send", "sent")
     elif args.action == "mark-sent":
@@ -73,7 +81,43 @@ def handle(args, client, json_flag):
     elif args.action == "revert-issue":
         _revert_issue(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio invoices {list|show|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
+        sys.exit("Usage: bexio invoices {list|show|create|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
+
+
+def _read_body(path: str) -> dict:
+    if path == "-":
+        raw = sys.stdin.read()
+    else:
+        with open(path, "r") as f:
+            raw = f.read()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        sys.exit(f"Invalid JSON in {path}: {e}")
+
+
+def _format_validation_errors(exc) -> str:
+    lines = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err["loc"])
+        lines.append(f"  {loc}: {err['msg']}")
+    return "\n".join(lines)
+
+
+def _create(args, client, json_flag):
+    body = _read_body(args.file)
+    try:
+        invoice = KbInvoice.model_validate(body)
+    except Exception as e:
+        sys.exit(f"Invalid invoice body:\n{_format_validation_errors(e)}")
+    payload = invoice.model_dump(mode="json", exclude_none=True)
+    result = client.post("/kb_invoice", body=payload)
+    if json_flag:
+        print_json(result)
+        return
+    iid = result.get("id")
+    print(f"Invoice #{iid} ({result.get('document_nr', '—')}) created — {result.get('title', '')}")
+    print(f"  https://office.bexio.com/index.php/kb_invoice/show/id/{iid}")
 
 
 def _list(args, client, json_flag):

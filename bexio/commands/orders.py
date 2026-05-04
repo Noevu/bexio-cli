@@ -1,9 +1,14 @@
 """Order commands."""
 
+import json
 import sys
+from bexio.models import KbOrder, OrderRepetition
 from bexio.output import print_json, table
 
 KB_ITEM_STATUS = {1: "Draft", 4: "Pending", 5: "Active", 6: "Cancelled"}
+
+REPETITION_TYPES = ("daily", "weekly", "monthly", "yearly")
+MONTHLY_SCHEDULES = ("fixed_day", "week_day", "first_day", "last_day")
 
 
 def register(sub):
@@ -17,8 +22,30 @@ def register(sub):
     show = s.add_parser("show", help="Show order + repetition")
     show.add_argument("id", type=int)
 
+    create = s.add_parser("create", help="Create an order from a JSON body")
+    create.add_argument("--file", "-f", required=True,
+                        help="Path to JSON body file, or '-' to read stdin")
+
     create_inv = s.add_parser("create-invoice", help="Create invoice from order")
     create_inv.add_argument("id", type=int, help="Order ID")
+
+    unset_rep = s.add_parser("unset-repetition",
+                             help="Remove recurrence from an order (required before delete)")
+    unset_rep.add_argument("id", type=int, help="Order ID")
+
+    set_rep = s.add_parser("set-repetition", help="Set recurrence on an order")
+    set_rep.add_argument("id", type=int, help="Order ID")
+    set_rep.add_argument("--file", "-f",
+                         help="JSON body file (or '-' for stdin). If set, overrides flags.")
+    set_rep.add_argument("--start", help="Start date (YYYY-MM-DD)")
+    set_rep.add_argument("--end", default=None, help="End date (YYYY-MM-DD); omit for indefinite")
+    set_rep.add_argument("--type", dest="rep_type", choices=REPETITION_TYPES,
+                         help="Recurrence type")
+    set_rep.add_argument("--interval", type=int, default=1, help="Repetition interval (default 1)")
+    set_rep.add_argument("--schedule", choices=MONTHLY_SCHEDULES,
+                         help="Monthly only: when in the month to repeat")
+    set_rep.add_argument("--weekdays",
+                         help="Weekly only: comma-separated weekday names (monday,…,sunday)")
 
     search = s.add_parser("search", help="Search orders by name")
     search.add_argument("query", type=str)
@@ -38,8 +65,14 @@ def handle(args, client, json_flag):
         _list(args, client, json_flag)
     elif args.action == "show":
         _show(args, client, json_flag)
+    elif args.action == "create":
+        _create(args, client, json_flag)
     elif args.action == "create-invoice":
         _create_invoice(args, client, json_flag)
+    elif args.action == "set-repetition":
+        _set_repetition(args, client, json_flag)
+    elif args.action == "unset-repetition":
+        _unset_repetition(args, client, json_flag)
     elif args.action == "search":
         _search(args, client, json_flag)
     elif args.action == "delete":
@@ -47,7 +80,7 @@ def handle(args, client, json_flag):
     elif args.action == "pdf":
         _pdf(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio orders {list|show|create-invoice|search|delete|pdf}")
+        sys.exit("Usage: bexio orders {list|show|create|create-invoice|set-repetition|unset-repetition|search|delete|pdf}")
 
 
 def _list(args, client, json_flag):
@@ -80,6 +113,82 @@ def _show(args, client, json_flag):
     if isinstance(rep, dict) and "repetition" in rep:
         r = rep["repetition"]
         print(f"Repetition: {r.get('type')} every {r.get('interval')} — starts {rep.get('start')}")
+
+
+def _read_body(path: str) -> dict:
+    if path == "-":
+        raw = sys.stdin.read()
+    else:
+        with open(path, "r") as f:
+            raw = f.read()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        sys.exit(f"Invalid JSON in {path}: {e}")
+
+
+def _format_validation_errors(exc) -> str:
+    lines = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err["loc"])
+        lines.append(f"  {loc}: {err['msg']}")
+    return "\n".join(lines)
+
+
+def _create(args, client, json_flag):
+    body = _read_body(args.file)
+    try:
+        order = KbOrder.model_validate(body)
+    except Exception as e:
+        sys.exit(f"Invalid order body:\n{_format_validation_errors(e)}")
+    payload = order.model_dump(mode="json", exclude_none=True)
+    result = client.post("/kb_order", body=payload)
+    if json_flag:
+        print_json(result)
+        return
+    oid = result.get("id")
+    print(f"Order #{oid} ({result.get('document_nr', '—')}) created — {result.get('title', '')}")
+    print(f"  https://office.bexio.com/index.php/kb_order/show/id/{oid}")
+
+
+def _set_repetition(args, client, json_flag):
+    if args.file:
+        body = _read_body(args.file)
+    else:
+        if not args.start or not args.rep_type:
+            sys.exit("set-repetition requires --file OR --start + --type")
+        rep: dict = {"type": args.rep_type, "interval": args.interval}
+        if args.rep_type == "monthly":
+            if not args.schedule:
+                sys.exit("--schedule is required for type=monthly (one of: " + ", ".join(MONTHLY_SCHEDULES) + ")")
+            rep["schedule"] = args.schedule
+        if args.rep_type == "weekly":
+            if not args.weekdays:
+                sys.exit("--weekdays is required for type=weekly (e.g. monday,wednesday)")
+            rep["weekdays"] = [d.strip().lower() for d in args.weekdays.split(",") if d.strip()]
+        body = {"start": args.start, "end": args.end, "repetition": rep}
+
+    try:
+        spec = OrderRepetition.model_validate(body)
+    except Exception as e:
+        sys.exit(f"Invalid repetition body:\n{_format_validation_errors(e)}")
+    payload = spec.model_dump(mode="json")
+    result = client.post(f"/kb_order/{args.id}/repetition", body=payload)
+    if json_flag:
+        print_json(result)
+        return
+    r = result.get("repetition", {}) if isinstance(result, dict) else {}
+    print(f"Order {args.id} recurrence set: {r.get('type')} every {r.get('interval')} — starts {result.get('start')}")
+    if args.end:
+        print(f"  ends {args.end}")
+
+
+def _unset_repetition(args, client, json_flag):
+    result = client.delete(f"/kb_order/{args.id}/repetition")
+    if json_flag:
+        print_json(result)
+        return
+    print(f"Order {args.id} recurrence removed.")
 
 
 def _create_invoice(args, client, json_flag):
