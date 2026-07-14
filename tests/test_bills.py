@@ -144,10 +144,72 @@ class TestBillsEdit(unittest.TestCase):
             from bexio.cli import main
             main()
 
-        method, path, body = captured[0]
-        self.assertEqual(method, "PUT")
+        put = next((c for c in captured if c[0] == "PUT"), None)
+        self.assertIsNotNone(put)
+        method, path, body = put
         self.assertEqual(path, "/purchase/bills/bill-uuid-001")
         self.assertEqual(body["title"], "New Title")
+
+    def test_edits_dates(self):
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return BILL
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "bills", "edit", "bill-uuid-001",
+                                "--bill-date", "2026-05-01", "--due-date", "2026-05-15"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        put = next(c for c in captured if c[0] == "PUT")
+        _, _, body = put
+        self.assertEqual(body["bill_date"], "2026-05-01")
+        self.assertEqual(body["due_date"], "2026-05-15")
+
+    def test_preserves_existing_attachments(self):
+        # A --title-only edit must NOT wipe the bill's attachments: the v4 PUT
+        # clears attachment_ids if omitted, so the command reads and carries them back.
+        with_attach = dict(BILL, attachment_ids=["file-uuid-A", "file-uuid-B"])
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return with_attach
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "bills", "edit", "bill-uuid-001", "--title", "New Title"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        put = next(c for c in captured if c[0] == "PUT")
+        _, _, body = put
+        self.assertEqual(body["attachment_ids"], ["file-uuid-A", "file-uuid-B"])
+
+    def test_attach_overrides_attachments(self):
+        with_attach = dict(BILL, attachment_ids=["old-file"])
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+            captured.append((method, path, body))
+            return with_attach
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "bills", "edit", "bill-uuid-001",
+                                "--attach", "new-1, new-2"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        put = next(c for c in captured if c[0] == "PUT")
+        _, _, body = put
+        self.assertEqual(body["attachment_ids"], ["new-1", "new-2"])
 
     def test_uses_v4_endpoint(self):
         captured = []

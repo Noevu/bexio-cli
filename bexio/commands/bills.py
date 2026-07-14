@@ -25,6 +25,12 @@ def register(sub):
     edit.add_argument("id", help="Bill UUID")
     edit.add_argument("--title", help="New title")
     edit.add_argument("--total", dest="total_gross", help="New gross total")
+    edit.add_argument("--bill-date", dest="bill_date", help="New bill date (YYYY-MM-DD)")
+    edit.add_argument("--due-date", dest="due_date", help="New due date (YYYY-MM-DD)")
+    edit.add_argument("--attach", dest="attachment_ids",
+                      help="Comma-separated file UUIDs to set as attachments. "
+                           "NOTE: this REPLACES the attachment list — pass every "
+                           "UUID you want kept (the v4 PUT clears any omitted).")
 
     delete = s.add_parser("delete", help="Delete a bill")
     delete.add_argument("id", help="Bill UUID")
@@ -101,11 +107,28 @@ def _create(args, client, json_flag):
 
 
 def _edit(args, client, json_flag):
+    # v4 purchase-bill PUT is patch-style for most scalar fields (rejects the full
+    # echoed object, e.g. read-only `id`; leaves omitted scalars unchanged) — BUT
+    # `attachment_ids` is replace-semantics: omit it and the API CLEARS the bill's
+    # attachments. So we always read the current attachment_ids and carry them back
+    # unless --attach explicitly overrides, otherwise a `--title` edit would silently
+    # wipe the receipt off a booked bill.
     body = {}
     if args.title is not None:
         body["title"] = args.title
     if args.total_gross is not None:
         body["total_gross"] = args.total_gross
+    if args.bill_date is not None:
+        body["bill_date"] = args.bill_date
+    if args.due_date is not None:
+        body["due_date"] = args.due_date
+    if args.attachment_ids is not None:
+        body["attachment_ids"] = [x.strip() for x in args.attachment_ids.split(",") if x.strip()]
+    else:
+        current = client.get_v4(f"{BILLS_PATH}/{args.id}")
+        existing = current.get("attachment_ids")
+        if existing:
+            body["attachment_ids"] = existing
     bill = client.put_v4(f"{BILLS_PATH}/{args.id}", body=body)
     if json_flag:
         print_json(bill)
