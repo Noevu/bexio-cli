@@ -6,7 +6,7 @@ import sys
 from bexio import __version__
 from bexio.auth import cmd_auth_login, cmd_auth_logout, cmd_auth_status, get_token
 from bexio.client import BexioClient
-from bexio.commands import accounts, bills, contacts, countries, currencies, invoices, items, lookup, orders, payment_types, payments, projects, quotes, reminders, taxes, timesheets
+from bexio.commands import accounts, bills, contacts, countries, currencies, invoices, items, lookup, manual_entries, orders, payment_types, payments, projects, quotes, reminders, taxes, timesheets
 
 
 def main() -> None:
@@ -47,6 +47,7 @@ def main() -> None:
     projects.register_milestones(sub)
     projects.register_work_packages(sub)
     reminders.register(sub)
+    manual_entries.register(sub)
 
     args = parser.parse_args()
 
@@ -111,6 +112,11 @@ def main() -> None:
         projects.handle_work_packages(args, client, json_flag)
     elif args.resource == "reminders":
         reminders.handle(args, client, json_flag)
+    elif args.resource == "manual-entries":
+        try:
+            manual_entries.handle(args, client, json_flag)
+        except manual_entries.ManualEntryError as e:
+            sys.exit(str(e))
     else:
         parser.print_help()
         sys.exit(1)

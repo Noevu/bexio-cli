@@ -29,6 +29,9 @@ class BexioClient:
     def post(self, path: str, body: dict | None = None) -> Any:
         return self._request("POST", path, body=body)
 
+    def post_v3(self, path: str, body: dict | None = None) -> Any:
+        return self._request("POST", path, body=body, base="https://api.bexio.com/3.0")
+
     def post_v4(self, path: str, body: dict | None = None) -> Any:
         return self._request("POST", path, body=body, base="https://api.bexio.com/4.0")
 
