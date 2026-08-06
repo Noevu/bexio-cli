@@ -108,16 +108,28 @@ class TestContactsCreate(unittest.TestCase):
         self.assertEqual(captured[0][0], "POST")
         self.assertIn("/contact", captured[0][1])
 
-    def test_name_in_body(self):
+    def test_company_name_uses_api_field_name_1(self):
+        # Bexio rejects `name` with 422 "Unexpected extra form field named name"
         _, captured = self._capture_create(["--name", "AIHK"])
-        self.assertEqual(captured[0][2]["name"], "AIHK")
+        body = captured[0][2]
+        self.assertEqual(body["name_1"], "AIHK")
+        self.assertNotIn("name", body)
 
-    def test_person_fields_in_body(self):
+    def test_person_fields_map_to_name_1_and_name_2(self):
         _, captured = self._capture_create(["--firstname", "Anna", "--lastname", "Imperia", "--email", "anna@test.ch"])
         body = captured[0][2]
-        self.assertEqual(body["firstname"], "Anna")
-        self.assertEqual(body["lastname"], "Imperia")
+        self.assertEqual(body["name_1"], "Imperia")   # surname
+        self.assertEqual(body["name_2"], "Anna")      # given name
         self.assertEqual(body["mail"], "anna@test.ch")
+        self.assertNotIn("firstname", body)
+        self.assertNotIn("lastname", body)
+
+    def test_mandatory_owner_fields_are_sent(self):
+        # Bexio 422: "user_id: Pflichtfeld", "owner_id: Pflichtfeld"
+        _, captured = self._capture_create(["--name", "AIHK"])
+        body = captured[0][2]
+        self.assertEqual(body["user_id"], 1)
+        self.assertEqual(body["owner_id"], 1)
 
     def test_prints_id_and_url(self):
         out, _ = self._capture_create(["--name", "AIHK"])

@@ -84,18 +84,21 @@ def _show(args, client, json_flag):
 
 
 def _create(args, client, json_flag):
-    body = {"contact_type_id": args.contact_type_id}
+    # Bexio names its fields name_1/name_2, not name/firstname/lastname, and demands
+    # user_id + owner_id — anything else comes back as 422 "Pflichtfeld".
+    # Company: name_1 = company name. Person: name_1 = surname, name_2 = given name.
+    body = {"contact_type_id": args.contact_type_id, "user_id": 1, "owner_id": 1}
     if args.name:
-        body["name"] = args.name
-    if args.firstname:
-        body["firstname"] = args.firstname
+        body["name_1"] = args.name
     if args.lastname:
-        body["lastname"] = args.lastname
+        body["name_1"] = args.lastname
+    if args.firstname:
+        body["name_2"] = args.firstname
     if args.mail:
         body["mail"] = args.mail
     if args.phone_fixed:
         body["phone_fixed"] = args.phone_fixed
-    if not body.get("name") and not (body.get("firstname") or body.get("lastname")):
+    if not body.get("name_1") and not body.get("name_2"):
         sys.exit("Provide --name (company) or --firstname/--lastname (person)")
     result = client.post("/contact", body=body)
     if json_flag:

@@ -24,8 +24,22 @@ def register(sub):
     create.add_argument("--file", "-f", required=True,
                         help="Path to JSON body file, or '-' to read stdin")
 
-    send = s.add_parser("send", help="Send invoice by email")
+    send = s.add_parser(
+        "send",
+        help="Send invoice by email (really sends — recipient must be given)",
+        description="Sends the invoice as an email through Bexio. The API needs a body; "
+                    "a bare call returns 422 'missing data'. Nothing is guessed: the "
+                    "recipient is always explicit.",
+    )
     send.add_argument("id", type=int)
+    send.add_argument("--to", dest="recipient_email", required=True,
+                      help="Recipient email address — this address receives the mail")
+    send.add_argument("--subject", default="", help="Email subject")
+    send.add_argument("--message", default="", help="Email body text")
+    send.add_argument("--cc", dest="cc_email", help="CC address")
+    send.add_argument("--bcc", dest="bcc_email", help="BCC address")
+    send.add_argument("--mark-open", dest="mark_as_open", action="store_true",
+                      help="Also mark the invoice as open (issued)")
 
     mark = s.add_parser("mark-sent", help="Mark sent (no email)")
     mark.add_argument("id", type=int)
@@ -63,7 +77,7 @@ def handle(args, client, json_flag):
     elif args.action == "create":
         _create(args, client, json_flag)
     elif args.action == "send":
-        _action(args, client, json_flag, f"/kb_invoice/{args.id}/send", "sent")
+        _send(args, client, json_flag)
     elif args.action == "mark-sent":
         _action(args, client, json_flag, f"/kb_invoice/{args.id}/mark_as_sent", "marked as sent")
     elif args.action == "cancel":
@@ -152,6 +166,24 @@ def _show(args, client, json_flag):
     print(f"Total:   CHF {float(inv.get('total', 0)):.2f}")
     print(f"Status:  {status}")
     print(f"URL:     https://office.bexio.com/index.php/kb_invoice/show/id/{inv['id']}")
+
+
+def _send(args, client, json_flag):
+    body = {
+        "recipient_email": args.recipient_email,
+        "subject": args.subject,
+        "message": args.message,
+        "mark_as_open": bool(args.mark_as_open),
+    }
+    if args.cc_email:
+        body["cc_email"] = args.cc_email
+    if args.bcc_email:
+        body["bcc_email"] = args.bcc_email
+    result = client.post(f"/kb_invoice/{args.id}/send", body=body)
+    if json_flag:
+        print_json(result)
+        return
+    print(f"Invoice {args.id} emailed to {args.recipient_email}.")
 
 
 def _action(args, client, json_flag, path, verb):

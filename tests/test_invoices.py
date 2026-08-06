@@ -74,26 +74,58 @@ class TestInvoiceShow(unittest.TestCase):
 
 
 class TestInvoiceSend(unittest.TestCase):
-    def test_posts_to_send_endpoint(self):
+    """The send endpoint needs a body — a bare POST returns 422 "missing data"
+    (observed against the live account 2026-08-06). Recipient, subject and message
+    are required, so the CLI never guesses who gets the mail."""
+
+    def _capture_send(self, argv_tail):
         captured = []
 
         def fake_request(self, method, path, params=None, body=None):
-            captured.append((method, path))
+            captured.append((method, path, body))
             return {}
 
         with patch("bexio.client.BexioClient._request", fake_request), \
              patch("bexio.auth.get_token", return_value="FAKE"), \
-             patch("sys.argv", ["bexio", "invoices", "send", "123"]), \
+             patch("sys.argv", ["bexio", "invoices", "send"] + argv_tail), \
              patch("sys.stdout", io.StringIO()):
             from bexio.cli import main
             main()
+        return captured
 
-        self.assertIn(("POST", "/kb_invoice/123/send"), captured)
+    def test_posts_to_send_endpoint(self):
+        captured = self._capture_send(["123", "--to", "kunde@test.ch",
+                                       "--subject", "Rechnung", "--message", "Guten Tag"])
+        self.assertEqual(captured[0][0], "POST")
+        self.assertEqual(captured[0][1], "/kb_invoice/123/send")
 
-    def test_prints_confirmation(self):
-        out = capture_with_responses(["invoices", "send", "123"], [{}])
+    def test_body_carries_recipient_subject_and_message(self):
+        captured = self._capture_send(["123", "--to", "kunde@test.ch",
+                                       "--subject", "Rechnung 42", "--message", "Guten Tag"])
+        body = captured[0][2]
+        self.assertEqual(body["recipient_email"], "kunde@test.ch")
+        self.assertEqual(body["subject"], "Rechnung 42")
+        self.assertEqual(body["message"], "Guten Tag")
+        self.assertFalse(body["mark_as_open"])
+
+    def test_optional_cc_bcc_and_mark_open(self):
+        captured = self._capture_send(["123", "--to", "a@test.ch", "--subject", "s",
+                                       "--message", "m", "--cc", "b@test.ch",
+                                       "--bcc", "c@test.ch", "--mark-open"])
+        body = captured[0][2]
+        self.assertEqual(body["cc_email"], "b@test.ch")
+        self.assertEqual(body["bcc_email"], "c@test.ch")
+        self.assertTrue(body["mark_as_open"])
+
+    def test_recipient_is_required(self):
+        with self.assertRaises(SystemExit):
+            self._capture_send(["123", "--subject", "s", "--message", "m"])
+
+    def test_prints_confirmation_naming_the_recipient(self):
+        out = capture_with_responses(["invoices", "send", "123", "--to", "kunde@test.ch",
+                                      "--subject", "s", "--message", "m"], [{}])
         self.assertIn("123", out)
-        self.assertIn("sent", out)
+        self.assertIn("kunde@test.ch", out)
 
 
 class TestInvoiceMarkSent(unittest.TestCase):

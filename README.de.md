@@ -112,11 +112,18 @@ bexio invoices show 47                   Details von Rechnung 47
 bexio invoices search "Muster AG"        Rechnungen nach Name suchen
 bexio invoices create --file body.json   Rechnung aus JSON-Body erstellen
 bexio invoices pdf 47                    Rechnung 47 als PDF herunterladen
-bexio invoices send 47                   Rechnung 47 per E-Mail senden
+bexio invoices send 47 --to kunde@firma.ch --subject "Rechnung 47" \
+  --message "Guten Tag\n\nIhre Rechnung: [Network Link]"   verschickt wirklich eine E-Mail
 bexio invoices issue 47                  Rechnung 47 ausstellen
 bexio invoices cancel 47                 Rechnung 47 stornieren
 bexio invoices copy 47                   Rechnung 47 kopieren
 ```
+
+`send` verschickt wirklich eine E-Mail über Bexio — der Empfänger steht immer explizit da
+(`--to`), und der Nachrichtentext muss den Platzhalter `[Network Link]` enthalten, den Bexio
+durch den Link auf das Dokument ersetzt. Ohne ihn antwortet die API mit `422` und sendet
+nichts. Hintergrund:
+[docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md](docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md).
 
 Weitere Status-Filter: `partial` (teilweise bezahlt), `paid` (bezahlt), `cancelled` (storniert)
 

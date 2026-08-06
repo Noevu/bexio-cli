@@ -112,11 +112,17 @@ bexio invoices show 47                   show full details of invoice 47
 bexio invoices search "Muster AG"        find invoices by name
 bexio invoices create --file body.json   create an invoice from a JSON body
 bexio invoices pdf 47                    download invoice 47 as PDF
-bexio invoices send 47                   send invoice 47 by email
+bexio invoices send 47 --to kunde@firma.ch --subject "Rechnung 47" \
+  --message "Guten Tag\n\nIhre Rechnung: [Network Link]"   really emails the recipient
 bexio invoices issue 47                  finalize invoice 47
 bexio invoices cancel 47                 cancel invoice 47
 bexio invoices copy 47                   make a copy of invoice 47
 ```
+
+`send` really sends an email through Bexio — the recipient is always explicit (`--to`), and
+the message must contain the placeholder `[Network Link]`, which Bexio replaces with the link
+to the document. Without it the API answers `422` and sends nothing. Background:
+[docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md](docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md).
 
 Other status filters: `partial` (partially paid), `paid`, `cancelled`
 
