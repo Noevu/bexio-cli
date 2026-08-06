@@ -222,6 +222,32 @@ bexio reminders send 47 30               send reminder 30 (on invoice 47) by ema
 bexio reminders pdf 47 30                download reminder as PDF
 ```
 
+### Manual entries (Sammelbuchungen, general ledger)
+
+```
+bexio manual-entries list --limit 20                     recent entries
+bexio manual-entries list --from 2026-07-01 --to 2026-07-31
+bexio manual-entries show 827                            all lines of entry 827
+bexio manual-entries create --date 2026-07-01 --reference-nr 702 \
+  --line "debit=1030,amount=119.84,currency=CHF,text=Rückerstattung" \
+  --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=Rückerstattung" \
+  --line "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz"
+```
+
+Line fields: `debit=` **or** `credit=` (account **number**, never the internal id),
+`amount=`, `currency=` (default CHF), `rate=` (default 1), `tax=` (tax **code**, e.g.
+`Vorsteuer8.1` or `V00` for tax-free), `text=`. Put `text=` last if it contains commas,
+or pass `--lines-file entries.json` with the same field names.
+
+Guardrails:
+
+- Debit and credit totals must match — a mismatch prints both sums and the difference, and **nothing is sent**.
+- `--reference-nr` is the visible Beleg number (not the API id); an existing one is refused.
+- The date is stored verbatim as `YYYY-MM-DD`. The Bexio web UI sometimes *displays* a neighbouring day — the API value is the truth, which matters at a month or quarter boundary.
+- Tax codes must be explicit: a tax-free line needs `V00`, it never happens by omission. A sales tax code on an expense account is refused.
+- `show <id>` takes the API id and scans recent entries (the v3 API has no single-entry GET) — raise `--limit` for older ones.
+- `edit` and `delete` are not shipped yet: the replace-semantics of the v3 PUT are unverified, and clarifying them needs a real booking in the live account.
+
 ### Reference data (taxes, accounts, currencies, etc.)
 
 ```
@@ -367,7 +393,7 @@ args = []
 
 ### What the AI can do
 
-~35 tools covering invoices, orders, quotes, contacts, payments, items, bills, projects, timesheets, reminders, and accounting reference data. Works with any MCP-compatible AI assistant.
+50 tools covering invoices, orders, quotes, contacts, payments, items, bills, projects, timesheets, reminders, manual entries (Sammelbuchungen), and accounting reference data. Works with any MCP-compatible AI assistant.
 
 ---
 

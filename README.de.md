@@ -224,6 +224,32 @@ bexio reminders send 47 30               Mahnung 30 (zu Rechnung 47) per E-Mail 
 bexio reminders pdf 47 30                Mahnung als PDF herunterladen
 ```
 
+### Sammelbuchungen (Hauptbuch)
+
+```
+bexio manual-entries list --limit 20                     letzte Buchungen
+bexio manual-entries list --from 2026-07-01 --to 2026-07-31
+bexio manual-entries show 827                            alle Zeilen von Buchung 827
+bexio manual-entries create --date 2026-07-01 --reference-nr 702 \
+  --line "debit=1030,amount=119.84,currency=CHF,text=Rückerstattung" \
+  --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=Rückerstattung" \
+  --line "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz"
+```
+
+Felder je Zeile: `debit=` **oder** `credit=` (Konto**nummer**, nie die interne ID),
+`amount=`, `currency=` (Standard CHF), `rate=` (Standard 1), `tax=` (Steuer**code**, z. B.
+`Vorsteuer8.1`, oder `V00` für steuerfrei), `text=`. `text=` ans Ende setzen, wenn es
+Kommas enthält — oder `--lines-file buchung.json` mit denselben Feldnamen verwenden.
+
+Sicherungen:
+
+- Soll- und Habensumme müssen übereinstimmen. Bei Abweichung werden beide Summen und die Differenz genannt und **nichts gesendet**.
+- `--reference-nr` ist die sichtbare Belegnummer (nicht die API-ID); eine bereits vergebene wird abgewiesen.
+- Das Datum wird als `YYYY-MM-DD` unverändert gespeichert. Die Bexio-Oberfläche zeigt gelegentlich den Nachbartag an — massgeblich ist der API-Wert, was am Monats- oder Quartalsende über die Steuerperiode entscheidet.
+- Steuercodes sind immer explizit: steuerfrei ist `V00`, nie das Weglassen. Ein Umsatzsteuercode auf einem Aufwandskonto wird abgewiesen.
+- `show <id>` erwartet die API-ID und durchsucht die letzten Buchungen (die v3-API kennt kein Einzel-GET) — für ältere Einträge `--limit` erhöhen.
+- `edit` und `delete` fehlen noch: die Ersetzungssemantik des v3-PUT ist unbestätigt und lässt sich nur mit einer echten Buchung im Produktivmandanten klären.
+
 ### Stammdaten (Steuern, Konten, Währungen usw.)
 
 ```
@@ -369,7 +395,7 @@ args = []
 
 ### Was die KI tun kann
 
-Rund 35 Tools für Rechnungen, Aufträge, Offerten, Kontakte, Zahlungen, Artikel, Lieferantenrechnungen, Projekte, Zeiterfassung, Mahnungen und Stammdaten. Funktioniert mit jedem MCP-kompatiblen KI-Assistenten.
+50 Tools für Rechnungen, Aufträge, Offerten, Kontakte, Zahlungen, Artikel, Lieferantenrechnungen, Projekte, Zeiterfassung, Mahnungen, Sammelbuchungen und Stammdaten. Funktioniert mit jedem MCP-kompatiblen KI-Assistenten.
 
 ---
 
