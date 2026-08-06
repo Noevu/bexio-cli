@@ -35,6 +35,23 @@ Betreff wie übergeben.
    Der CLI hängt ihn nicht automatisch an — der Text gehört dem Absender, nicht dem Werkzeug;
    die Fehlermeldung der API ist eindeutig genug.
 
+## HTML und PDF-Anhang — zweiter Test
+
+Gleicher Aufbau, Rechnung 405 an dieselbe Adresse, `--attach-pdf` und HTML im Text:
+
+- **HTML wird als HTML zugestellt.** `<p>`, `<b>`, `<i>`, `<br>` landen im `text/html`-Teil,
+  Bexio verlinkt die eingesetzte Netzwerk-URL zusätzlich als `<a href>`.
+- **`attach_pdf: true` hängt das PDF an** — `06-08-2026-2304-000250.pdf`,
+  `application/pdf`. Ohne das Feld bekommt der Empfänger nur den Link.
+- **Kein Bexio-Rahmen**: kein Logo, kein Vorspann, kein Footer. Der Text ist vollständig
+  eigener Inhalt, Absender bleibt die im Mandanten hinterlegte Adresse (`billing@noevu.ch`).
+- **Einschränkung:** der `text/plain`-Teil enthält denselben HTML-Quelltext, Bexio erzeugt
+  keine saubere Text-Alternative. In Clients ohne HTML-Darstellung sind die Tags sichtbar.
+  Wer das vermeiden will, verzichtet auf Markup oder hält es minimal.
+
+Damit sind eigene Vorlagen pro Kunde möglich: Text, Formatierung und Anhang bestimmt der
+Aufruf, nicht die Bexio-Oberfläche.
+
 ## Verwandt
 
 - `bexio invoices send --to … --subject … --message "… [Network Link]"`

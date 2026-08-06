@@ -40,6 +40,8 @@ def register(sub):
     send.add_argument("--bcc", dest="bcc_email", help="BCC address")
     send.add_argument("--mark-open", dest="mark_as_open", action="store_true",
                       help="Also mark the invoice as open (issued)")
+    send.add_argument("--attach-pdf", dest="attach_pdf", action="store_true",
+                      help="Attach the invoice PDF (otherwise the mail only carries the link)")
 
     mark = s.add_parser("mark-sent", help="Mark sent (no email)")
     mark.add_argument("id", type=int)
@@ -174,6 +176,7 @@ def _send(args, client, json_flag):
         "subject": args.subject,
         "message": args.message,
         "mark_as_open": bool(args.mark_as_open),
+        "attach_pdf": bool(args.attach_pdf),
     }
     if args.cc_email:
         body["cc_email"] = args.cc_email

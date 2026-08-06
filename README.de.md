@@ -122,7 +122,9 @@ bexio invoices copy 47                   Rechnung 47 kopieren
 `send` verschickt wirklich eine E-Mail über Bexio — der Empfänger steht immer explizit da
 (`--to`), und der Nachrichtentext muss den Platzhalter `[Network Link]` enthalten, den Bexio
 durch den Link auf das Dokument ersetzt. Ohne ihn antwortet die API mit `422` und sendet
-nichts. Hintergrund:
+nichts. `--attach-pdf` hängt das Rechnungs-PDF an; HTML im `--message` wird als HTML
+zugestellt, und Bexio setzt weder Kopf noch Logo noch Fusszeile dazu — der Text gehört ganz
+dir, womit eigene Vorlagen pro Kunde möglich werden. Hintergrund:
 [docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md](docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md).
 
 Weitere Status-Filter: `partial` (teilweise bezahlt), `paid` (bezahlt), `cancelled` (storniert)

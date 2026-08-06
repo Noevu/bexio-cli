@@ -117,6 +117,16 @@ class TestInvoiceSend(unittest.TestCase):
         self.assertEqual(body["bcc_email"], "c@test.ch")
         self.assertTrue(body["mark_as_open"])
 
+    def test_attach_pdf_flag_sets_the_api_field(self):
+        captured = self._capture_send(["123", "--to", "a@test.ch", "--subject", "s",
+                                       "--message", "m", "--attach-pdf"])
+        self.assertTrue(captured[0][2]["attach_pdf"])
+
+    def test_attach_pdf_defaults_to_false(self):
+        captured = self._capture_send(["123", "--to", "a@test.ch", "--subject", "s",
+                                       "--message", "m"])
+        self.assertFalse(captured[0][2]["attach_pdf"])
+
     def test_recipient_is_required(self):
         with self.assertRaises(SystemExit):
             self._capture_send(["123", "--subject", "s", "--message", "m"])
