@@ -1,6 +1,7 @@
 """Bexio MCP server — exposes Bexio API as tools for AI assistants (Claude, etc.)."""
 
 import json
+import re
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -21,6 +22,9 @@ def _c() -> BexioClient:
 
 def _json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+ME_PATH = "/accounting/manual_entries"
 
 
 # ─── Invoices ────────────────────────────────────────────────────────────────
@@ -406,6 +410,74 @@ def send_reminder(invoice_id: int, reminder_id: int) -> str:
     """Send a payment reminder by email."""
     _c().post(f"/kb_invoice/{invoice_id}/kb_reminder/{reminder_id}/send")
     return f"Reminder {reminder_id} sent."
+
+
+# ─── Manual entries (Sammelbuchungen) ────────────────────────────────────────
+
+@mcp.tool()
+def list_manual_entries(limit: int = 100, date_from: str | None = None,
+                        date_to: str | None = None) -> str:
+    """List manual entries (Sammelbuchungen). Dates are YYYY-MM-DD, filtered client-side."""
+    entries = _c().get_v3(ME_PATH, params={"limit": limit, "order_by": "id_desc"})
+    entries = entries.get("data", entries) if isinstance(entries, dict) else entries
+    if date_from:
+        entries = [e for e in entries if str(e.get("date", ""))[:10] >= date_from]
+    if date_to:
+        entries = [e for e in entries if str(e.get("date", ""))[:10] <= date_to]
+    return _json(entries)
+
+
+@mcp.tool()
+def show_manual_entry(entry_id: int, limit: int = 2000) -> str:
+    """Show one manual entry by its API id (NOT the Beleg number).
+
+    The v3 API has no single-entry GET, so the collection is scanned; raise limit
+    for older entries.
+    """
+    entries = _c().get_v3(ME_PATH, params={"limit": limit, "order_by": "id_desc"})
+    entries = entries.get("data", entries) if isinstance(entries, dict) else entries
+    entry = next((e for e in entries if e.get("id") == entry_id), None)
+    if entry is None:
+        return (f"Manual entry {entry_id} not found in the last {limit} entries — "
+                f"raise limit, or check it is the API id and not a Beleg number.")
+    return _json(entry)
+
+
+@mcp.tool()
+def create_manual_entry(date: str, lines: list[dict], reference_nr: str | None = None) -> str:
+    """Create a compound manual entry — this WRITES INTO THE GENERAL LEDGER (Hauptbuch).
+
+    Each line: {"debit": "1030"} or {"credit": "4450"} (account NUMBER, exactly one
+    side), "amount", optional "currency" (default CHF), "rate" (default 1),
+    "tax" (code like Vorsteuer8.1 or V00), "text". Debit and credit totals must
+    match or nothing is sent. The date is stored verbatim as YYYY-MM-DD — the web
+    UI may display a neighbouring day, the API holds the truth.
+    """
+    from bexio.commands.manual_entries import (ManualEntryError, Resolver, build_entry,
+                                               check_balance, normalize_line)
+
+    try:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(date or "")):
+            raise ManualEntryError(f"Date {date!r} must be YYYY-MM-DD.")
+        parsed = [normalize_line(dict(line)) for line in lines]
+        if not parsed:
+            raise ManualEntryError("No lines given.")
+        check_balance(parsed)
+        client = _c()
+        if reference_nr:
+            existing_raw = client.get_v3(ME_PATH, params={"limit": 500, "order_by": "id_desc"})
+            existing_raw = (existing_raw.get("data", existing_raw)
+                            if isinstance(existing_raw, dict) else existing_raw)
+            dupe = next((e for e in existing_raw
+                         if str(e.get("reference_nr", "")) == str(reference_nr)), None)
+            if dupe:
+                raise ManualEntryError(
+                    f"Beleg {reference_nr} already exists (API id {dupe.get('id')}).")
+        entry = build_entry(parsed, Resolver(client), date=date, reference_nr=reference_nr)
+        created = client.post_v3(ME_PATH, body=entry)
+    except ManualEntryError as e:
+        return f"REFUSED: {e}"
+    return _json(created)
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
