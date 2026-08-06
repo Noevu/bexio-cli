@@ -95,6 +95,14 @@ class FakeClient:
         self.calls.append(("POST3", path, body))
         return self.posted
 
+    def put_v3(self, path, body=None):
+        self.calls.append(("PUT3", path, body))
+        return self.posted
+
+    def delete_v3(self, path):
+        self.calls.append(("DELETE3", path))
+        return {}
+
 
 def run_handle(args_ns, client, json_flag=False):
     """Run manual_entries.handle with stdout captured."""
@@ -398,6 +406,103 @@ class TestCreateAndBalance(unittest.TestCase):
         run_handle(create_args(line=[], lines_file=path), client)
         body = [c for c in client.calls if c[0] == "POST3"][0][2]
         self.assertEqual(len(body["entries"]), 2)
+
+
+class TestEditAndDelete(unittest.TestCase):
+    """The v3 PUT replaces the whole line set — an omitted line is GONE.
+
+    Verified against the live tenant on 2026-08-06 with a 0.01 test entry
+    (see docs/solutions). Every edit therefore reads, merges and writes back
+    all lines, and `edit --line` means "this is the complete new line set".
+    """
+
+    def edit_args(self, entry_id=831, **over):
+        base = dict(action="edit", id=entry_id, date=None, reference_nr=None,
+                    line=[], lines_file=None, limit=2000)
+        base.update(over)
+        return Namespace(**base)
+
+    def test_edit_without_lines_writes_all_existing_lines_back(self):
+        client = FakeClient(entries=[ENTRY_702])
+        run_handle(self.edit_args(entry_id=827, date="2026-07-02"), client)
+        puts = [c for c in client.calls if c[0] == "PUT3"]
+        self.assertEqual(len(puts), 1)
+        path, body = puts[0][1], puts[0][2]
+        self.assertEqual(path, "/accounting/manual_entries/827")
+        self.assertEqual(body["date"], "2026-07-02")
+        self.assertEqual(len(body["entries"]), 3)
+        self.assertEqual(body["entries"][1]["credit_account_id"], 243)
+        self.assertEqual(body["entries"][1]["tax_id"], 53)
+        self.assertEqual(body["entries"][1]["base_currency_amount"], 120.33)
+
+    def test_edit_strips_read_only_line_fields(self):
+        client = FakeClient(entries=[ENTRY_702])
+        run_handle(self.edit_args(entry_id=827, reference_nr="702b"), client)
+        body = [c for c in client.calls if c[0] == "PUT3"][0][2]
+        for line in body["entries"]:
+            self.assertNotIn("id", line)
+            self.assertNotIn("created_by_user_id", line)
+
+    def test_edit_with_lines_replaces_the_whole_set(self):
+        client = FakeClient(entries=[ENTRY_702])
+        run_handle(self.edit_args(entry_id=827, line=[
+            "debit=1030,amount=50,currency=CHF,text=neu",
+            "credit=4450,amount=50,currency=CHF,text=neu",
+        ]), client)
+        body = [c for c in client.calls if c[0] == "PUT3"][0][2]
+        self.assertEqual(len(body["entries"]), 2)
+        self.assertEqual(body["entries"][0]["amount"], 50.0)
+
+    def test_edit_checks_balance_before_sending(self):
+        from bexio.commands.manual_entries import ManualEntryError
+
+        client = FakeClient(entries=[ENTRY_702])
+        with self.assertRaises(ManualEntryError):
+            run_handle(self.edit_args(entry_id=827, line=[
+                "debit=1030,amount=50,text=x",
+                "credit=4450,amount=40,text=x",
+            ]), client)
+        self.assertFalse([c for c in client.calls if c[0] == "PUT3"])
+
+    def test_edit_without_any_change_is_refused(self):
+        from bexio.commands.manual_entries import ManualEntryError
+
+        client = FakeClient(entries=[ENTRY_702])
+        with self.assertRaises(ManualEntryError):
+            run_handle(self.edit_args(entry_id=827), client)
+        self.assertFalse([c for c in client.calls if c[0] == "PUT3"])
+
+    def test_edit_unknown_id_errors(self):
+        from bexio.commands.manual_entries import ManualEntryError
+
+        with self.assertRaises(ManualEntryError) as ctx:
+            run_handle(self.edit_args(entry_id=99999, date="2026-07-02"), FakeClient())
+        self.assertIn("99999", str(ctx.exception))
+
+    def test_delete_uses_the_api_id(self):
+        client = FakeClient()
+        run_handle(Namespace(action="delete", id=827, limit=2000), client)
+        deletes = [c for c in client.calls if c[0] == "DELETE3"]
+        self.assertEqual(deletes[0][1], "/accounting/manual_entries/827")
+
+    def test_delete_refuses_a_beleg_number(self):
+        from bexio.commands.manual_entries import ManualEntryError
+
+        client = FakeClient()
+        with self.assertRaises(ManualEntryError) as ctx:
+            run_handle(Namespace(action="delete", id=702, limit=2000), client)
+        msg = str(ctx.exception)
+        self.assertIn("702", msg)
+        self.assertIn("827", msg)  # names the API id it is the Beleg of
+        self.assertFalse([c for c in client.calls if c[0] == "DELETE3"])
+
+    def test_delete_unknown_id_errors(self):
+        from bexio.commands.manual_entries import ManualEntryError
+
+        client = FakeClient()
+        with self.assertRaises(ManualEntryError):
+            run_handle(Namespace(action="delete", id=99999, limit=2000), client)
+        self.assertFalse([c for c in client.calls if c[0] == "DELETE3"])
 
 
 class TestCliRegistration(unittest.TestCase):

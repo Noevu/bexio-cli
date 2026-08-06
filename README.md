@@ -232,6 +232,9 @@ bexio manual-entries create --date 2026-07-01 --reference-nr 702 \
   --line "debit=1030,amount=119.84,currency=CHF,text=Rückerstattung" \
   --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=Rückerstattung" \
   --line "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz"
+bexio manual-entries edit 832 --date 2026-08-05            change the date, keep all lines
+bexio manual-entries edit 832 --line "..." --line "..."    replace the COMPLETE line set
+bexio manual-entries delete 832                            delete (API id, not Beleg number)
 ```
 
 Line fields: `debit=` **or** `credit=` (account **number**, never the internal id),
@@ -245,8 +248,9 @@ Guardrails:
 - `--reference-nr` is the visible Beleg number (not the API id); an existing one is refused.
 - The date is stored verbatim as `YYYY-MM-DD`. The Bexio web UI sometimes *displays* a neighbouring day — the API value is the truth, which matters at a month or quarter boundary.
 - Tax codes must be explicit: a tax-free line needs `V00`, it never happens by omission. A sales tax code on an expense account is refused.
-- `show <id>` takes the API id and scans recent entries (the v3 API has no single-entry GET) — raise `--limit` for older ones.
-- `edit` and `delete` are not shipped yet: the replace-semantics of the v3 PUT are unverified, and clarifying them needs a real booking in the live account.
+- `show`, `edit` and `delete` take the API id and scan recent entries (the v3 API has no single-entry GET) — raise `--limit` for older ones. Pass a Beleg number by mistake and you get told which API id it belongs to, before anything is written.
+- **The v3 PUT replaces the whole line set** — verified against the live account on 2026-08-06: sending two of three lines deletes the third. `edit` therefore always writes every line back; `edit --line` means "this is the complete new set". Details: [docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md](docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md).
+- Bexio assigns **no** Beleg number by itself — without `--reference-nr` the entry stays without one, and the CLI says so.
 
 ### Reference data (taxes, accounts, currencies, etc.)
 

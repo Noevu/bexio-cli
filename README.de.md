@@ -234,6 +234,9 @@ bexio manual-entries create --date 2026-07-01 --reference-nr 702 \
   --line "debit=1030,amount=119.84,currency=CHF,text=Rückerstattung" \
   --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=Rückerstattung" \
   --line "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz"
+bexio manual-entries edit 832 --date 2026-08-05            Datum ändern, Zeilen bleiben
+bexio manual-entries edit 832 --line "..." --line "..."    ersetzt den GESAMTEN Zeilensatz
+bexio manual-entries delete 832                            löschen (API-ID, nicht Belegnummer)
 ```
 
 Felder je Zeile: `debit=` **oder** `credit=` (Konto**nummer**, nie die interne ID),
@@ -247,8 +250,9 @@ Sicherungen:
 - `--reference-nr` ist die sichtbare Belegnummer (nicht die API-ID); eine bereits vergebene wird abgewiesen.
 - Das Datum wird als `YYYY-MM-DD` unverändert gespeichert. Die Bexio-Oberfläche zeigt gelegentlich den Nachbartag an — massgeblich ist der API-Wert, was am Monats- oder Quartalsende über die Steuerperiode entscheidet.
 - Steuercodes sind immer explizit: steuerfrei ist `V00`, nie das Weglassen. Ein Umsatzsteuercode auf einem Aufwandskonto wird abgewiesen.
-- `show <id>` erwartet die API-ID und durchsucht die letzten Buchungen (die v3-API kennt kein Einzel-GET) — für ältere Einträge `--limit` erhöhen.
-- `edit` und `delete` fehlen noch: die Ersetzungssemantik des v3-PUT ist unbestätigt und lässt sich nur mit einer echten Buchung im Produktivmandanten klären.
+- `show`, `edit` und `delete` erwarten die API-ID und durchsuchen die letzten Buchungen (die v3-API kennt kein Einzel-GET) — für ältere Einträge `--limit` erhöhen. Wer versehentlich eine Belegnummer eingibt, erfährt vor jedem Schreibzugriff, zu welcher API-ID sie gehört.
+- **Der v3-PUT ersetzt den ganzen Zeilensatz** — am 2026-08-06 im Produktivmandanten belegt: zwei von drei Zeilen gesendet, die dritte war gelöscht. `edit` schreibt deshalb immer alle Zeilen zurück; `edit --line` heisst «das ist der vollständige neue Satz». Details: [docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md](docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md).
+- Bexio vergibt **keine** Belegnummer von selbst — ohne `--reference-nr` bleibt die Buchung ohne, der CLI weist darauf hin.
 
 ### Stammdaten (Steuern, Konten, Währungen usw.)
 

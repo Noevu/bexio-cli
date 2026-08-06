@@ -59,6 +59,30 @@ def register(sub):
     create.add_argument("--limit", type=int, default=500,
                         help="How many recent entries to scan for a duplicate reference-nr")
 
+    edit = s.add_parser(
+        "edit",
+        help="Change an existing manual entry",
+        description="The v3 PUT REPLACES the whole line set: every line is always sent "
+                    "back, so an omitted one would be deleted. Without --line the "
+                    "existing lines are read and written back unchanged; with --line "
+                    "the given lines are the COMPLETE new set.",
+    )
+    edit.add_argument("id", type=int, help="API id (NOT the Beleg number)")
+    edit.add_argument("--date", help="New booking date (YYYY-MM-DD)")
+    edit.add_argument("--reference-nr", dest="reference_nr", help="New Beleg number")
+    edit.add_argument("--line", action="append", default=[],
+                      help="Complete new line set (same fields as create). "
+                           "Repeat per line; omitted lines are gone.")
+    edit.add_argument("--lines-file", dest="lines_file",
+                      help="JSON file with the complete new line set")
+    edit.add_argument("--limit", type=int, default=2000,
+                      help="How many entries to scan for the id")
+
+    delete = s.add_parser("delete", help="Delete a manual entry")
+    delete.add_argument("id", type=int, help="API id (NOT the Beleg number)")
+    delete.add_argument("--limit", type=int, default=2000,
+                        help="How many entries to scan for the id")
+
     return p
 
 
@@ -69,8 +93,12 @@ def handle(args, client, json_flag):
         _show(args, client, json_flag)
     elif args.action == "create":
         _create(args, client, json_flag)
+    elif args.action == "edit":
+        _edit(args, client, json_flag)
+    elif args.action == "delete":
+        _delete(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio manual-entries {list|show|create}")
+        sys.exit("Usage: bexio manual-entries {list|show|create|edit|delete}")
 
 
 # ── read ──────────────────────────────────────────────────────────────────────
@@ -121,7 +149,7 @@ def _show(args, client, json_flag):
     resolver = Resolver(client)
     print(f"ID:      {entry.get('id')}")
     print(f"Date:    {str(entry.get('date', ''))[:10]}")
-    print(f"Beleg:   {entry.get('reference_nr', '—')}")
+    print(f"Beleg:   {entry.get('reference_nr') or '—'}")
     print(f"Type:    {entry.get('type', '—')}")
     print()
     print(f"{'Side':<6}  {'Account':<10}  {'Amount':>12}  {'Cur':<4}  {'Rate':>10}  "
@@ -392,4 +420,91 @@ def _create(args, client, json_flag):
         print_json(created)
         return
     print(f"Manual entry {created.get('id')} created "
-          f"(Beleg {created.get('reference_nr', '—')}, date {date}, {len(lines)} lines)")
+          f"(Beleg {created.get('reference_nr') or '—'}, date {date}, {len(lines)} lines)")
+    if not created.get("reference_nr"):
+        print("Note: no Beleg number — Bexio does not assign one; pass --reference-nr "
+              "if this booking needs a document number.")
+
+
+# ── edit / delete ─────────────────────────────────────────────────────────────
+
+def _find_entry(client, entry_id, limit):
+    entries = _fetch(client, limit)
+    entry = next((e for e in entries if e.get("id") == entry_id), None)
+    if entry is not None:
+        return entry, entries
+    by_reference = next((e for e in entries
+                         if str(e.get("reference_nr", "")) == str(entry_id)), None)
+    if by_reference is not None:
+        raise ManualEntryError(
+            f"{entry_id} is a Beleg number, not an API id — Beleg {entry_id} belongs to "
+            f"API id {by_reference.get('id')}. Re-run with {by_reference.get('id')}.")
+    raise ManualEntryError(
+        f"Manual entry {entry_id} not found in the last {limit} entries. "
+        f"Raise --limit, or check that {entry_id} is the API id.")
+
+
+API_LINE_FIELDS = ("debit_account_id", "credit_account_id", "amount", "currency_id",
+                   "currency_factor", "base_currency_amount", "tax_id", "description")
+
+
+def strip_line(line: dict) -> dict:
+    """Keep only what the API accepts back — id/date/audit fields are read-only."""
+    kept = {k: line.get(k) for k in API_LINE_FIELDS if k in line}
+    if kept.get("tax_id") is None:
+        kept.pop("tax_id", None)
+    return kept
+
+
+def _edit(args, client, json_flag):
+    date = getattr(args, "date", None)
+    if date and not DATE_RE.match(str(date)):
+        raise ManualEntryError(f"Date {date!r} must be YYYY-MM-DD.")
+    reference_nr = getattr(args, "reference_nr", None)
+    has_new_lines = bool(getattr(args, "line", None) or getattr(args, "lines_file", None))
+    if not (date or reference_nr or has_new_lines):
+        raise ManualEntryError(
+            "Nothing to change — pass --date, --reference-nr, --line or --lines-file.")
+
+    entry, _ = _find_entry(client, args.id, getattr(args, "limit", 2000))
+
+    if has_new_lines:
+        lines = _collect_lines(args)
+        check_balance(lines)
+        api_lines = build_entry(lines, Resolver(client), date=date or "")["entries"]
+    else:
+        api_lines = [strip_line(l) for l in (entry.get("entries") or [])]
+        debit = round(sum(float(l.get("base_currency_amount") or 0)
+                          for l in api_lines if l.get("debit_account_id")), 2)
+        credit = round(sum(float(l.get("base_currency_amount") or 0)
+                           for l in api_lines if l.get("credit_account_id")), 2)
+        if round(debit - credit, 2) != 0:
+            raise ManualEntryError(
+                f"Stored entry {args.id} is unbalanced (Soll {debit:.2f} vs Haben "
+                f"{credit:.2f}) — refusing to write it back.")
+
+    body = {
+        "type": entry.get("type", "manual_compound_entry"),
+        "date": date or str(entry.get("date", ""))[:10],
+        "entries": api_lines,
+    }
+    new_reference = reference_nr if reference_nr is not None else entry.get("reference_nr")
+    if new_reference:
+        body["reference_nr"] = str(new_reference)
+
+    updated = client.put_v3(f"{MANUAL_ENTRIES_PATH}/{args.id}", body=body)
+    if json_flag:
+        print_json(updated)
+        return
+    print(f"Manual entry {args.id} updated ({len(api_lines)} lines written back)")
+
+
+def _delete(args, client, json_flag):
+    entry, _ = _find_entry(client, args.id, getattr(args, "limit", 2000))
+    client.delete_v3(f"{MANUAL_ENTRIES_PATH}/{args.id}")
+    if json_flag:
+        print_json({"deleted": args.id})
+        return
+    print(f"Manual entry {args.id} deleted "
+          f"(Beleg {entry.get('reference_nr') or '—'}, date {str(entry.get('date', ''))[:10]}, "
+          f"{len(entry.get('entries') or [])} lines)")

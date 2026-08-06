@@ -38,11 +38,17 @@ class BexioClient:
     def put(self, path: str, body: dict | None = None) -> Any:
         return self._request("PUT", path, body=body)
 
+    def put_v3(self, path: str, body: dict | None = None) -> Any:
+        return self._request("PUT", path, body=body, base="https://api.bexio.com/3.0")
+
     def put_v4(self, path: str, body: dict | None = None) -> Any:
         return self._request("PUT", path, body=body, base="https://api.bexio.com/4.0")
 
     def delete(self, path: str) -> Any:
         return self._request("DELETE", path)
+
+    def delete_v3(self, path: str) -> Any:
+        return self._request("DELETE", path, base="https://api.bexio.com/3.0")
 
     def delete_v4(self, path: str) -> Any:
         return self._request("DELETE", path, base="https://api.bexio.com/4.0")
