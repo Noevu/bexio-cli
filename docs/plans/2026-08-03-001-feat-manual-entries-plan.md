@@ -64,9 +64,32 @@ Dieser Plan ergänzt `bexio manual-entries` (list / show / create / edit / delet
 
 ---
 
+## Verification Contract
+
+**Testrunner ist `unittest`, nicht pytest.** `python3 -m pytest tests/` sammelt null Tests — die Suite läuft über `python3 -m unittest discover -s tests`. Basis vor dieser Arbeit: 385 Tests, grün.
+
+Alle neuen Tests dieser Arbeit liegen in **`tests/test_manual_entries.py`**, im Muster von `tests/test_accounting.py` (`capture_with_responses` aus `tests/helpers.py`).
+
+Eine Bedingung, die genau dann hält, wenn die agentenseitige Arbeit fertig ist:
+
+```bash
+cd ~/projects/bexio-cli \
+  && python3 -m unittest tests.test_manual_entries -q \
+  && python3 -m unittest discover -s tests -q \
+  && rg -q 'manual-entries' /Users/noel/projects/ai-system/config/claude/hooks/external-action-guard.sh
+```
+
+Die drei Glieder prüfen: die neuen Tests existieren und laufen · nichts Bestehendes ist gebrochen · der Guard kennt die neue Ressource (U5, sonst ungeprüfter Schreibweg ins Hauptbuch).
+
+**Die Bedingung endet bewusst vor U4.** `edit`/`delete` brauchen eine echte Testbuchung im Produktivmandanten und damit Noëls Freigabe im Einzelfall — eine Abbruchbedingung, die auf eine menschliche Handlung wartet, ist nie erfüllbar und würde endlos laufen.
+
 ## Implementation Units
 
 ### U1. Lesepfad — `list` und `show`
+
+**Verification:** `python3 -m unittest tests.test_manual_entries.TestManualEntriesRead -q`
+**Tests:** `tests/test_manual_entries.py`
+
 
 Neues Modul `bexio/commands/manual_entries.py` im Muster von `bills.py` (`register(sub)` + Befehlsfunktionen), registriert in `bexio/cli.py`. Endpunkt `GET /3.0/accounting/manual_entries` über `client.get_v3`. `show` löst Konto-IDs zu Nummern und Steuer-IDs zu Codes auf (R6/R7) und gibt Soll/Haben lesbar aus.
 
@@ -74,11 +97,19 @@ Neues Modul `bexio/commands/manual_entries.py` im Muster von `bills.py` (`regist
 
 ### U2. Auflösung von Konten und Steuercodes
 
+**Verification:** `python3 -m unittest tests.test_manual_entries.TestResolveAccountsAndTaxes -q`
+**Tests:** `tests/test_manual_entries.py`
+
+
 Hilfsfunktionen, die Kontonummer → `account_id` und Steuercode → `tax_id` auflösen, mit Zwischenspeicherung pro Prozess (jeder Aufruf sonst zwei zusätzliche Requests). Prüfung analog zu `bexio_booking.py`: inaktiver Code und Umsatzsteuercode auf einer Aufwandszeile werden verweigert.
 
 **Test zuerst:** bekannte Nummer löst auf; unbekannte bricht mit Vorschlagsliste; inaktiver Steuercode bricht; Umsatzsteuercode auf Aufwandszeile bricht.
 
 ### U3. `create` mit Bilanzprüfung
+
+**Verification:** `python3 -m unittest tests.test_manual_entries.TestCreateAndBalance -q`
+**Tests:** `tests/test_manual_entries.py`
+
 
 Zeilen-Syntax festlegen. Empfehlung: wiederholbares `--line`, ein Argument pro Zeile, Felder durch `:` getrennt und benannt, damit die Reihenfolge nicht auswendig gelernt werden muss — z. B.
 `--line "debit=1030,amount=119.84,currency=CHF,text=..."`.
@@ -90,11 +121,17 @@ Bilanzprüfung nach R4 vor dem Request. Datum als expliziter String (R8).
 
 ### U4. `edit` und `delete`
 
+**Verification:** menschlich — Testbuchung 0.01 im Produktivmandanten, danach gelöscht. NICHT Teil der /goal-Bedingung.
+
+
 Erst die Ersetzungssemantik aus R3 empirisch klären — eine Testbuchung anlegen, eine Zeile ändern, zurücklesen. **Diese Klärung läuft gegen einen echten Mandanten und braucht Noëls Freigabe**; ohne sie wird `edit` nicht ausgeliefert, `list`/`show`/`create` aber schon.
 
 **Test zuerst:** `edit` liest bestehende Zeilen und schickt sie vollständig zurück (sofern die Klärung Ersetzungssemantik ergibt); `delete` verlangt die API-ID und weist eine Belegnummer als Eingabe ab (R10-Fallstrick).
 
 ### U5. Guard-Erweiterung — blockierend
+
+**Verification:** `rg -q 'manual-entries' ~/projects/ai-system/config/claude/hooks/external-action-guard.sh` PLUS ein beobachtet ausgelöster Freigabedialog.
+
 
 In `ai-system/config/claude/hooks/external-action-guard.sh` die Ressourcenliste um `manual-entries` erweitern, sodass `create|edit|delete` in den bestehenden Freigabe-Zweig fallen (interaktiv fragen, headless blocken). Danach `rulesync generate` beziehungsweise das Settings-Sync-Skript, Änderung committen und pushen.
 
@@ -102,9 +139,16 @@ In `ai-system/config/claude/hooks/external-action-guard.sh` die Ressourcenliste 
 
 ### U6. MCP-Operationen
 
+**Verification:** `python3 -c "import bexio.mcp_server as m; assert hasattr(m,'create_manual_entry')"`
+**Tests:** `tests/test_manual_entries.py`
+
+
 `list_manual_entries`, `show_manual_entry`, `create_manual_entry` in `bexio/mcp_server.py` im Muster der bestehenden `@mcp.tool()`-Funktionen. Der schreibende Aufruf trägt im Docstring den Hinweis, dass er ins Hauptbuch schreibt.
 
 ### U7. Dokumentation
+
+**Verification:** `rg -q 'manual-entries' README.md README.de.md`
+
 
 `README.md` und `README.de.md` um den Befehl ergänzen. In `~/projects/ai-system/.rulesync/skills/bexio/` festhalten, dass Sammelbuchungen jetzt über den CLI gehen — die Skill-Referenz `reference/ui-deep-links.md` verweist bereits auf `accounting/manualEntries/id/<id>` für die Oberfläche. Danach `rulesync generate`.
 
