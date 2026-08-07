@@ -67,13 +67,26 @@ Du brauchst einen API-Token — stell dir das wie ein Passwort vor, mit dem das 
 2. Zu **Einstellungen → API-Token** navigieren
 3. Neuen Token erstellen und kopieren
 
-**Token speichern:**
+**Bei einem langlebigen API-Token: speichern.**
 
 ```
 bexio auth login
 ```
 
-Token einfügen, wenn du gefragt wirst. Er wird sicher im Passwort-Manager deines Systems gespeichert (macOS Schlüsselbund, Windows Credential Manager oder Linux Secret Service) — du musst ihn nicht nochmals eingeben.
+Token einfügen, wenn du gefragt wirst. Er wird sicher im Passwort-Manager deines Systems gespeichert (macOS Schlüsselbund, Windows Credential Manager oder Linux Secret Service).
+
+**Bei OAuth stattdessen auf den Token-Provider zeigen** — ein OAuth-Access-Token läuft
+stündlich ab, und eine gespeicherte Kopie erneuert sich nicht. Einmal ins Shell-Profil:
+
+```
+export BEXIO_TOKEN_COMMAND='<Befehl, der einen frischen Token ausgibt>'
+```
+
+Der CLI führt ihn pro Aufruf aus, damit veraltet der Token nie. Reihenfolge:
+`BEXIO_API_TOKEN` (ausdrückliche Einmal-Überschreibung) → `BEXIO_TOKEN_COMMAND` (live)
+→ gespeicherter Token (kann veraltet sein) → Fehler. Ein scheiternder Befehl warnt auf
+stderr und fällt zurück, statt abzubrechen; `bexio auth status` zeigt, welche Quelle
+tatsächlich greift.
 
 **Verbindung prüfen:**
 
@@ -241,7 +254,7 @@ bexio manual-entries list --from 2026-07-01 --to 2026-07-31
 bexio manual-entries show 827                            alle Zeilen von Buchung 827
 bexio manual-entries create --date 2026-07-01 --reference-nr 702 \
   --line "debit=1030,amount=119.84,currency=CHF,text=Rückerstattung" \
-  --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=Rückerstattung" \
+  --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,text=Rückerstattung" \
   --line "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz"
 bexio manual-entries edit 832 --date 2026-08-05            Datum ändern, Zeilen bleiben
 bexio manual-entries edit 832 --line "..." --line "..."    ersetzt den GESAMTEN Zeilensatz
@@ -258,6 +271,7 @@ Sicherungen:
 - Soll- und Habensumme müssen übereinstimmen. Bei Abweichung werden beide Summen und die Differenz genannt und **nichts gesendet**.
 - `--reference-nr` ist die sichtbare Belegnummer (nicht die API-ID); eine bereits vergebene wird abgewiesen.
 - Das Datum wird als `YYYY-MM-DD` unverändert gespeichert. Die Bexio-Oberfläche zeigt gelegentlich den Nachbartag an — massgeblich ist der API-Wert, was am Monats- oder Quartalsende über die Steuerperiode entscheidet.
+- **Eine Steuer auf einer Zeile wird derzeit ABGEWIESEN** — der v3-Endpunkt verwirft sie still. Gegen den echten Mandanten belegt (2026-08-07, zwei Wegwerf-Buchungen, danach gelöscht): `tax_id` allein kam als `tax_id: None` zurück, `tax_id` + `tax_account_id` — genau das Paar, das eine über die Oberfläche gesetzte Zeile trägt — ebenfalls, auf POST wie auf PUT, ohne Fehler. Ein steuerlos gebuchter Aufwand ist unsichtbar und schlimmer als keine Buchung, also verweigern `create`/`edit` und senden nichts. Steuerfreie Zeilen hier anlegen und die Steuer in der Oberfläche setzen, oder den ganzen Beleg dort buchen. `build_entry` erzeugt weiter die korrekte Payload mit Steuer — fällt die API-Sperre, muss nur die Verweigerung weg.
 - Steuercodes sind immer explizit: steuerfrei ist `V00`, nie das Weglassen. Ein Umsatzsteuercode auf einem Aufwandskonto wird abgewiesen.
 - `show`, `edit` und `delete` erwarten die API-ID und durchsuchen die letzten Buchungen (die v3-API kennt kein Einzel-GET) — für ältere Einträge `--limit` erhöhen. Wer versehentlich eine Belegnummer eingibt, erfährt vor jedem Schreibzugriff, zu welcher API-ID sie gehört.
 - **Der v3-PUT ersetzt den ganzen Zeilensatz** — am 2026-08-06 im Produktivmandanten belegt: zwei von drei Zeilen gesendet, die dritte war gelöscht. `edit` schreibt deshalb immer alle Zeilen zurück; `edit --line` heisst «das ist der vollständige neue Satz». Details: [docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md](docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md).

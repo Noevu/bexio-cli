@@ -67,13 +67,27 @@ You need an API token — think of it as a password that lets this tool talk to 
 2. Go to **Settings → API tokens**
 3. Create a new token and copy it
 
-**Save it:**
+**If your token is a long-lived API token, save it:**
 
 ```
 bexio auth login
 ```
 
-Paste your token when asked. It gets stored securely in your system's password manager (macOS Keychain, Windows Credential Manager, or Linux Secret Service) — you won't need to enter it again.
+Paste your token when asked. It gets stored securely in your system's password manager (macOS Keychain, Windows Credential Manager, or Linux Secret Service).
+
+**If you authenticate via OAuth, point the CLI at your token provider instead** — an
+OAuth access token expires hourly, and a stored copy does not refresh. Set this once
+in your shell profile:
+
+```
+export BEXIO_TOKEN_COMMAND='<command that prints a fresh token>'
+```
+
+The CLI runs it per call, so the token is never stale. Resolution order is
+`BEXIO_API_TOKEN` (explicit one-off override) → `BEXIO_TOKEN_COMMAND` (live) →
+stored token (may be stale) → error. A failing command warns on stderr and falls
+back rather than dying, and `bexio auth status` tells you which source is actually
+in use.
 
 **Check it's working:**
 
@@ -239,7 +253,7 @@ bexio manual-entries list --from 2026-07-01 --to 2026-07-31
 bexio manual-entries show 827                            all lines of entry 827
 bexio manual-entries create --date 2026-07-01 --reference-nr 702 \
   --line "debit=1030,amount=119.84,currency=CHF,text=Rückerstattung" \
-  --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=Rückerstattung" \
+  --line "credit=4450,amount=765.35,currency=BRL,rate=0.157222,text=Rückerstattung" \
   --line "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz"
 bexio manual-entries edit 832 --date 2026-08-05            change the date, keep all lines
 bexio manual-entries edit 832 --line "..." --line "..."    replace the COMPLETE line set
@@ -256,6 +270,7 @@ Guardrails:
 - Debit and credit totals must match — a mismatch prints both sums and the difference, and **nothing is sent**.
 - `--reference-nr` is the visible Beleg number (not the API id); an existing one is refused.
 - The date is stored verbatim as `YYYY-MM-DD`. The Bexio web UI sometimes *displays* a neighbouring day — the API value is the truth, which matters at a month or quarter boundary.
+- **A line tax is currently REFUSED** — the v3 endpoint discards it silently. Verified against the live account on 2026-08-07 with two throwaway entries (both deleted): `tax_id` alone came back as `tax_id: None`, and so did `tax_id` + `tax_account_id` — the exact pair a UI-set line carries — on POST *and* PUT, with no error. Booking a taxed expense as untaxed is invisible and worse than not booking, so `create`/`edit` refuse and send nothing. Create the untaxed lines here and set the tax in the web UI, or book the whole entry there. `build_entry` still constructs the correct taxed payload, so the day Bexio accepts it only the refusal has to go.
 - Tax codes must be explicit: a tax-free line needs `V00`, it never happens by omission. A sales tax code on an expense account is refused.
 - `show`, `edit` and `delete` take the API id and scan recent entries (the v3 API has no single-entry GET) — raise `--limit` for older ones. Pass a Beleg number by mistake and you get told which API id it belongs to, before anything is written.
 - **The v3 PUT replaces the whole line set** — verified against the live account on 2026-08-06: sending two of three lines deletes the third. `edit` therefore always writes every line back; `edit --line` means "this is the complete new set". Details: [docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md](docs/solutions/integration-issues/manual-entries-put-replaces-lines-2026-08-06.md).
