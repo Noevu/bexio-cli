@@ -6,6 +6,7 @@ from argparse import Namespace
 from unittest.mock import patch
 
 from tests.helpers import capture_with_responses
+from bexio.commands.manual_entries import ManualEntryError, assert_tax_is_persistable, normalize_line, parse_line
 
 ACCOUNTS = [
     {"id": 24, "account_no": "1030", "name": "Wise CHF", "account_type": "1", "is_active": True},
@@ -262,6 +263,13 @@ class TestCreateAndBalance(unittest.TestCase):
         "debit=6949,amount=0.49,currency=CHF,text=Kursdifferenz",
     ]
 
+    # Untaxed twin: LINES_702 carries a tax, and `_create` refuses those (the API
+    # drops a line tax silently). Tests about date/reference-nr handling use this.
+    LINES_SIMPLE = [
+        "debit=6949,amount=10.00,currency=CHF,text=Umbuchung",
+        "credit=1030,amount=10.00,currency=CHF,text=Umbuchung",
+    ]
+
     def test_parse_line_reads_named_fields(self):
         from bexio.commands.manual_entries import parse_line
 
@@ -311,12 +319,17 @@ class TestCreateAndBalance(unittest.TestCase):
             parse_line("debit=1030,amount=0,text=x")
 
     def test_beleg_702_produces_expected_payload(self):
-        client = FakeClient(entries=[ENTRY_OLD])  # Beleg 702 not booked yet
-        run_handle(create_args(line=self.LINES_702, reference_nr="702"), client)
-        posts = [c for c in client.calls if c[0] == "POST3"]
-        self.assertEqual(len(posts), 1)
-        path, body = posts[0][1], posts[0][2]
-        self.assertEqual(path, "/accounting/manual_entries")
+        """The plan's success criterion, at the payload layer.
+
+        It can no longer run through `_create`: that path now REFUSES a taxed line
+        because the API drops the tax (see TestTaxIsRefusedBecauseTheApiDropsIt).
+        `build_entry` stays pure and keeps proving we construct the right payload —
+        so the day Bexio accepts a line tax, only the refusal has to go."""
+        from bexio.commands.manual_entries import Resolver, build_entry
+
+        lines = [normalize_line(parse_line(s)) for s in self.LINES_702]
+        body = build_entry(lines, Resolver(FakeClient()), date="2026-07-01",
+                           reference_nr="702")
         self.assertEqual(body["type"], "manual_compound_entry")
         self.assertEqual(body["date"], "2026-07-01")
         self.assertEqual(body["reference_nr"], "702")
@@ -331,6 +344,13 @@ class TestCreateAndBalance(unittest.TestCase):
              "currency_id": 1, "currency_factor": 1.0, "base_currency_amount": 0.49,
              "description": "Kursdifferenz"},
         ])
+
+    def test_create_refuses_the_taxed_beleg_702_lines(self):
+        """Same lines through the real path: refused, nothing sent."""
+        client = FakeClient(entries=[ENTRY_OLD])
+        with self.assertRaises(ManualEntryError):
+            run_handle(create_args(line=self.LINES_702, reference_nr="702"), client)
+        self.assertEqual([c for c in client.calls if c[0] == "POST3"], [])
 
     def test_unbalanced_entry_names_both_sums_and_difference(self):
         from bexio.commands.manual_entries import ManualEntryError
@@ -370,7 +390,7 @@ class TestCreateAndBalance(unittest.TestCase):
 
     def test_date_is_sent_verbatim(self):
         client = FakeClient()
-        run_handle(create_args(date="2026-07-01", line=self.LINES_702), client)
+        run_handle(create_args(date="2026-07-01", line=self.LINES_SIMPLE), client)
         body = [c for c in client.calls if c[0] == "POST3"][0][2]
         self.assertEqual(body["date"], "2026-07-01")
 
@@ -379,14 +399,14 @@ class TestCreateAndBalance(unittest.TestCase):
 
         client = FakeClient()
         with self.assertRaises(ManualEntryError) as ctx:
-            run_handle(create_args(line=self.LINES_702, reference_nr="690"), client)
+            run_handle(create_args(line=self.LINES_SIMPLE, reference_nr="690"), client)
         self.assertIn("690", str(ctx.exception))
         self.assertIn("790", str(ctx.exception))
         self.assertFalse([c for c in client.calls if c[0] == "POST3"])
 
     def test_reference_nr_is_optional(self):
         client = FakeClient()
-        run_handle(create_args(line=self.LINES_702), client)
+        run_handle(create_args(line=self.LINES_SIMPLE), client)
         body = [c for c in client.calls if c[0] == "POST3"][0][2]
         self.assertNotIn("reference_nr", body)
 
@@ -533,3 +553,41 @@ class TestMcpTools(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTaxIsRefusedBecauseTheApiDropsIt(unittest.TestCase):
+    """The v3 manual-entries endpoint DISCARDS a line tax without any error.
+    Proven against the live API 2026-08-07 with two throwaway entries (both
+    deleted): sending `tax_id` alone came back `tax_id: None`; sending
+    `tax_id` + `tax_account_id` (the exact pair a UI-set line carries) came
+    back `tax_id: None` too, on POST *and* on PUT. Root cause unknown — Bexio
+    publishes no docs for it.
+
+    Booking a taxed expense as untaxed is precisely the Kontera-era error this
+    whole pipeline exists to prevent, and it would be invisible. So a tax on a
+    line is REFUSED until the mechanism is understood: no silent half-booking."""
+
+    def _lines(self, *specs):
+        return [normalize_line(parse_line(s)) for s in specs]
+
+    def test_a_line_with_a_tax_is_refused_before_any_request(self):
+        lines = self._lines("debit=4450,amount=10,currency=CHF,tax=Vorsteuer8.1,text=x",
+                            "credit=1030,amount=10,currency=CHF,text=x")
+        with self.assertRaises(ManualEntryError) as ctx:
+            assert_tax_is_persistable(lines)
+        msg = str(ctx.exception)
+        self.assertIn("Vorsteuer8.1", msg)
+        self.assertIn("1", msg)
+
+    def test_untaxed_lines_pass(self):
+        lines = self._lines("debit=6940,amount=0.01,currency=CHF,text=x",
+                            "credit=1030,amount=0.01,currency=CHF,text=x")
+        assert_tax_is_persistable(lines)
+
+    def test_create_refuses_and_sends_nothing(self):
+        client = FakeClient()
+        args = create_args(line=["debit=4450,amount=10,currency=CHF,tax=V00,text=x",
+                                 "credit=1030,amount=10,currency=CHF,text=x"])
+        with self.assertRaises(ManualEntryError):
+            run_handle(args, client)
+        self.assertEqual([c for c in client.calls if c[0] == "POST3"], [])

@@ -345,6 +345,34 @@ def base_amount(line: dict) -> float:
     return round(line["amount"] * line["rate"], 2)
 
 
+def assert_tax_is_persistable(lines: list[dict]) -> None:
+    """Refuse any line carrying a tax — the v3 endpoint DISCARDS it silently.
+
+    Verified against the live API on 2026-08-07 with two throwaway entries (both
+    deleted afterwards): a line sent with `tax_id` alone came back `tax_id: None`;
+    sent with `tax_id` + `tax_account_id` — the exact pair a UI-set line carries
+    (`tax_id: 53`, `tax_account_id: 243`) — it came back `tax_id: None` as well, on
+    POST *and* on PUT. No error, no warning, the tax is simply gone. Bexio publishes
+    no documentation for this endpoint, so the mechanism stays unknown.
+
+    Why refuse instead of warn: an expense booked without its input tax is exactly
+    the Kontera-era error this pipeline was rebuilt to prevent, and it leaves no
+    trace to find later. Better no booking than a silently untaxed one. Set the tax
+    in the web UI after creating the untaxed lines, or book the whole entry there.
+    """
+    tagged = [(i + 1, l["tax"]) for i, l in enumerate(lines) if l.get("tax")]
+    if not tagged:
+        return
+    detail = ", ".join(f"line {i} ({code})" for i, code in tagged)
+    raise ManualEntryError(
+        f"Refusing to send a tax the API drops: {detail}. The v3 manual-entries "
+        f"endpoint discards a line's tax without erroring (verified 2026-08-07, "
+        f"POST and PUT). An untaxed expense booking is worse than none — nothing "
+        f"was sent. Either drop the tax= fields and set the tax in the web UI "
+        f"afterwards, or book this entry in the UI entirely."
+    )
+
+
 def check_balance(lines: list[dict]) -> None:
     debit = round(sum(base_amount(l) for l in lines if l["debit"]), 2)
     credit = round(sum(base_amount(l) for l in lines if l["credit"]), 2)
@@ -402,6 +430,7 @@ def _create(args, client, json_flag):
     if not DATE_RE.match(str(date)):
         raise ManualEntryError(f"Date {date!r} must be YYYY-MM-DD.")
     lines = _collect_lines(args)
+    assert_tax_is_persistable(lines)
     check_balance(lines)
 
     reference_nr = getattr(args, "reference_nr", None)
@@ -470,6 +499,7 @@ def _edit(args, client, json_flag):
 
     if has_new_lines:
         lines = _collect_lines(args)
+        assert_tax_is_persistable(lines)
         check_balance(lines)
         api_lines = build_entry(lines, Resolver(client), date=date or "")["entries"]
     else:
