@@ -202,8 +202,8 @@ class TestRemindersPdf(unittest.TestCase):
         if os.path.exists(tmp):
             os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
-            if accept == "application/pdf":
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
+            if raw:
                 return b"FAKEPDF"
             return REMINDER
 
@@ -225,8 +225,8 @@ class TestRemindersPdf(unittest.TestCase):
         if os.path.exists(default_file):
             os.unlink(default_file)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
-            if accept == "application/pdf":
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
+            if raw:
                 return b"FAKEPDF"
             return REMINDER
 
@@ -246,8 +246,8 @@ class TestRemindersPdf(unittest.TestCase):
         if os.path.exists(tmp):
             os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
-            if accept == "application/pdf":
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
+            if raw:
                 return b"FAKEPDF"
             return REMINDER
 

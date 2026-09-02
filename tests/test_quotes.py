@@ -171,7 +171,7 @@ class TestQuotesPdf(unittest.TestCase):
             tmp = f.name
         os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
             return b"FAKEPDF"
 
         with patch("bexio.client.BexioClient._request", fake_request), \
@@ -191,7 +191,7 @@ class TestQuotesPdf(unittest.TestCase):
         if os.path.exists(default_file):
             os.unlink(default_file)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
             return b"FAKEPDF"
 
         with patch("bexio.client.BexioClient._request", fake_request), \

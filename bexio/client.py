@@ -24,7 +24,9 @@ class BexioClient:
         return self._request("GET", path, params=params, base="https://api.bexio.com/4.0")
 
     def get_pdf(self, path: str) -> bytes:
-        return self._request("GET", path, accept="application/pdf")
+        # Bexio PDF endpoints return raw bytes but 415 on Accept: application/pdf —
+        # they require the same application/json Accept as every other call (NOE-3277).
+        return self._request("GET", path, raw=True)
 
     def post(self, path: str, body: dict | None = None) -> Any:
         return self._request("POST", path, body=body)
@@ -53,7 +55,7 @@ class BexioClient:
     def delete_v4(self, path: str) -> Any:
         return self._request("DELETE", path, base="https://api.bexio.com/4.0")
 
-    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None, accept: str = "application/json") -> Any:
+    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None, raw: bool = False) -> Any:
         url = (base or BASE_URL) + path
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
@@ -64,16 +66,16 @@ class BexioClient:
             method=method,
             headers={
                 "Authorization": f"Bearer {self._token}",
-                "Accept": accept,
+                "Accept": "application/json",
                 "Content-Type": "application/json",
             },
         )
         try:
             with urllib.request.urlopen(req) as resp:
-                raw = resp.read()
-                if accept == "application/pdf":
-                    return raw
-                return json.loads(raw) if raw else {}
+                payload = resp.read()
+                if raw:
+                    return payload
+                return json.loads(payload) if payload else {}
         except urllib.error.HTTPError as e:
             msg = e.read().decode(errors="replace")
             sys.exit(f"HTTP {e.code} {e.reason}: {msg}")

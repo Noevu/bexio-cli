@@ -131,6 +131,24 @@ class TestContactsCreate(unittest.TestCase):
         self.assertEqual(body["user_id"], 1)
         self.assertEqual(body["owner_id"], 1)
 
+    def test_address_fields_map_to_bexio_names(self):
+        # Bexio's writable address fields are street_name + house_number (+ addition),
+        # postcode, city, country_id. The single 'address' field is read-only. NOE-3277.
+        _, captured = self._capture_create([
+            "--name", "AIHK",
+            "--street", "Bahnhofstrasse", "--house-number", "1",
+            "--address-addition", "c/o Meier",
+            "--postcode", "5000", "--city", "Aarau", "--country-id", "1",
+        ])
+        body = captured[0][2]
+        self.assertEqual(body["street_name"], "Bahnhofstrasse")
+        self.assertEqual(body["house_number"], "1")
+        self.assertEqual(body["address_addition"], "c/o Meier")
+        self.assertEqual(body["postcode"], "5000")
+        self.assertEqual(body["city"], "Aarau")
+        self.assertEqual(body["country_id"], 1)
+        self.assertNotIn("address", body)
+
     def test_prints_id_and_url(self):
         out, _ = self._capture_create(["--name", "AIHK"])
         self.assertIn("300", out)
@@ -150,50 +168,91 @@ class TestContactsCreate(unittest.TestCase):
         self.assertEqual(parsed["id"], 300)
 
 
+# A Bexio contact edit is POST /2.0/contact/{id} (v2EditContact) and REPLACES the
+# whole record — so the CLI reads the existing contact, overlays the changed fields,
+# and posts the full body back. Otherwise omitted fields (address, phone…) get wiped.
+EXISTING_CONTACT = {
+    "id": 246, "contact_type_id": 1, "name_1": "AIHK", "name_2": None,
+    "user_id": 1, "owner_id": 1, "nr": "1234",
+    "mail": "info@aihk.ch", "phone_fixed": "+41 62 837 97 00",
+    "street_name": None, "house_number": None, "postcode": None, "city": None,
+    "country_id": None, "contact_group_ids": [5, 6],
+}
+
+
 class TestContactsEdit(unittest.TestCase):
+    def _capture_edit(self, argv_tail):
+        calls = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
+            calls.append((method, path, body))
+            if method == "GET":
+                return dict(EXISTING_CONTACT)
+            return {"id": 246}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "edit", "246"] + argv_tail), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+        return calls
+
+    def test_fetches_then_posts_to_contact_id(self):
+        calls = self._capture_edit(["--email", "new@test.ch"])
+        self.assertEqual(calls[0][0], "GET")
+        self.assertIn("/contact/246", calls[0][1])
+        self.assertEqual(calls[1][0], "POST")  # edit = POST, not PUT
+        self.assertEqual(calls[1][1], "/contact/246")
+
+    def test_change_is_overlaid(self):
+        calls = self._capture_edit(["--email", "new@test.ch"])
+        self.assertEqual(calls[1][2]["mail"], "new@test.ch")
+
+    def test_existing_fields_preserved_full_replace(self):
+        # Only the email changes; nothing else may be wiped by the replacement post.
+        calls = self._capture_edit(["--email", "new@test.ch"])
+        body = calls[1][2]
+        self.assertEqual(body["name_1"], "AIHK")
+        self.assertEqual(body["contact_type_id"], 1)
+        self.assertEqual(body["user_id"], 1)
+        self.assertEqual(body["owner_id"], 1)
+        self.assertEqual(body["phone_fixed"], "+41 62 837 97 00")
+        self.assertEqual(body["nr"], "1234")
+        self.assertEqual(body["contact_group_ids"], "5,6")  # list → csv on echo-back
+
+    def test_adds_address(self):
+        calls = self._capture_edit([
+            "--street", "Bahnhofstrasse", "--house-number", "1",
+            "--postcode", "5000", "--city", "Aarau", "--country-id", "1",
+        ])
+        body = calls[1][2]
+        self.assertEqual(body["street_name"], "Bahnhofstrasse")
+        self.assertEqual(body["house_number"], "1")
+        self.assertEqual(body["postcode"], "5000")
+        self.assertEqual(body["city"], "Aarau")
+        self.assertEqual(body["country_id"], 1)
+        self.assertEqual(body["name_1"], "AIHK")  # untouched
+
+    def test_name_maps_to_name_1(self):
+        calls = self._capture_edit(["--name", "New Name"])
+        body = calls[1][2]
+        self.assertEqual(body["name_1"], "New Name")
+        self.assertNotIn("name", body)
+
+    def test_person_name_parts_map(self):
+        calls = self._capture_edit(["--firstname", "Anna", "--lastname", "Imperia"])
+        body = calls[1][2]
+        self.assertEqual(body["name_1"], "Imperia")
+        self.assertEqual(body["name_2"], "Anna")
+
     def test_prints_confirmation(self):
-        out = capture_with_responses(["contacts", "edit", "246", "--name", "New Name"], [{"id": 246}])
+        out = capture_with_responses(
+            ["contacts", "edit", "246", "--name", "New Name"],
+            [dict(EXISTING_CONTACT), {"id": 246}],
+        )
         self.assertIn("updated", out)
         self.assertIn("246", out)
-
-    def test_puts_correct_endpoint(self):
-        captured = []
-
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
-            captured.append((method, path, body))
-            return {"id": 246}
-
-        with patch("bexio.client.BexioClient._request", fake_request), \
-             patch("bexio.auth.get_token", return_value="FAKE"), \
-             patch("sys.argv", ["bexio", "contacts", "edit", "246", "--name", "New Name"]), \
-             patch("sys.stdout", io.StringIO()):
-            from bexio.cli import main
-            main()
-
-        method, path, body = captured[0]
-        self.assertEqual(method, "PUT")
-        self.assertIn("/contact/246", path)
-
-    def test_sends_only_provided_fields(self):
-        captured = []
-
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
-            captured.append((method, path, body))
-            return {"id": 246}
-
-        with patch("bexio.client.BexioClient._request", fake_request), \
-             patch("bexio.auth.get_token", return_value="FAKE"), \
-             patch("sys.argv", ["bexio", "contacts", "edit", "246", "--email", "new@test.ch"]), \
-             patch("sys.stdout", io.StringIO()):
-            from bexio.cli import main
-            main()
-
-        body = captured[0][2]
-        self.assertIn("mail", body)
-        self.assertEqual(body["mail"], "new@test.ch")
-        self.assertNotIn("name", body)
-        self.assertNotIn("firstname", body)
-        self.assertNotIn("phone_fixed", body)
 
 
 class TestContactsDelete(unittest.TestCase):

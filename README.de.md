@@ -190,10 +190,12 @@ bexio quotes pdf 12                      Offerte 12 als PDF herunterladen
 bexio contacts list                      alle Kontakte anzeigen
 bexio contacts search "Muster"           Kontakte nach Name suchen
 bexio contacts show 5                    Details von Kontakt 5
-bexio contacts create --name "Muster AG" --email info@muster.ch
-bexio contacts edit 5 --email neu@muster.ch
+bexio contacts create --name "Muster AG" --email info@muster.ch --street Bahnhofstrasse --house-number 1 --postcode 8001 --city Zürich --country-id 1
+bexio contacts edit 5 --email neu@muster.ch --street Bahnhofstrasse --house-number 1 --postcode 8001 --city Zürich --country-id 1
 bexio contacts delete 5
 ```
+
+Eine Postadresse hinterlegen, damit Rechnungen eine Empfängeradresse drucken: `--street`, `--house-number`, `--address-addition`, `--postcode`, `--city`, `--country-id` (1 = Schweiz). Bexio setzt das schreibgeschützte Feld `address` aus diesen Teilen zusammen. `edit` liest den Kontakt zuerst und sendet den ganzen Datensatz zurück — eine Teiländerung löscht die übrigen Felder also nicht.
 
 Für eine Person (kein Unternehmen) `--firstname` und `--lastname` statt `--name` verwenden, und `--type 2` hinzufügen:
 
@@ -477,6 +479,12 @@ Hand erstellt werden:
   HTML-Entities (`&uuml;`, `&ouml;`, `&auml;`).
 - **`show_position_nr` wird beim POST auf `kb_order` abgelehnt** (funktioniert auf
   `kb_invoice`). Das `KbOrder`-Modell lässt das Feld weg; die API liefert sonst 422.
+- **Die Empfängeradresse der Rechnung kommt vom Kontakt.** `contact_address` auf
+  `kb_invoice` ist schreibgeschützt — zum Überschreiben der gedruckten Adresse
+  `contact_address_manual` (ein String) verwenden. Ein blosses `address` ist kein
+  Feld und wird abgelehnt. Normalerweise setzt man gar nichts: dem Kontakt eine
+  Adresse geben (`bexio contacts create … --street … --postcode … --city …`), dann
+  druckt sie automatisch.
 - **Repetition-`schedule` gilt nur für monthly.** Bei `type=daily`, `weekly` oder
   `yearly` antwortet die API mit "Diese Eingabe ist nicht korrekt." Gültige Werte
   für monthly: `fixed_day`, `week_day`, `first_day`, `last_day`.

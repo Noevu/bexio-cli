@@ -35,6 +35,7 @@ class KbInvoice(BaseModel):
     payment_type_id: int | None = None
     template_slug: str | None = None
     api_reference: str | None = None
+    contact_address_manual: str | None = None  # override printed address; contact_address is read-only
 
     positions: list[Position] = Field(default_factory=list)
 

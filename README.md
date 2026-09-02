@@ -189,10 +189,12 @@ bexio quotes pdf 12                      download quote 12 as PDF
 bexio contacts list                      show all contacts
 bexio contacts search "Muster"           find contacts by name
 bexio contacts show 5                    show full details of contact 5
-bexio contacts create --name "Muster AG" --email info@muster.ch
-bexio contacts edit 5 --email new@muster.ch
+bexio contacts create --name "Muster AG" --email info@muster.ch --street Bahnhofstrasse --house-number 1 --postcode 8001 --city Zürich --country-id 1
+bexio contacts edit 5 --email new@muster.ch --street Bahnhofstrasse --house-number 1 --postcode 8001 --city Zürich --country-id 1
 bexio contacts delete 5
 ```
+
+Give a contact a postal address so invoices print a recipient address: `--street`, `--house-number`, `--address-addition`, `--postcode`, `--city`, `--country-id` (1 = Switzerland). Bexio composes the read-only `address` field from these parts. `edit` reads the contact first and re-sends the whole record, so a partial edit never wipes the other fields.
 
 For a person (not a company), use `--firstname` and `--lastname` instead of `--name`, and add `--type 2`:
 
@@ -474,6 +476,12 @@ Pydantic models, but worth knowing when authoring JSON bodies by hand:
   (`&uuml;`, `&ouml;`, `&auml;`).
 - **`show_position_nr` is rejected on `kb_order` POST** (works on `kb_invoice`).
   The `KbOrder` model omits the field; the API returns 422 if you sneak it in.
+- **The invoice recipient address comes from the contact.** `contact_address` on
+  `kb_invoice` is read-only — to override the printed address use
+  `contact_address_manual` (a plain string). A bare `address` key is not a field
+  and is rejected. Normally you don't set it at all: give the contact an address
+  (`bexio contacts create … --street … --postcode … --city …`) and it prints
+  automatically.
 - **Repetition `schedule` is monthly-only.** Sending `schedule` with `type=daily`,
   `weekly`, or `yearly` returns "Diese Eingabe ist nicht korrekt." Valid values
   for monthly: `fixed_day`, `week_day`, `first_day`, `last_day`.

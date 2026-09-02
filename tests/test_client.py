@@ -131,3 +131,22 @@ class TestBexioClient(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=mock):
             result = self.client.post("/kb_invoice/1/send")
         self.assertEqual(result, {})
+
+    def test_get_pdf_sends_json_accept_and_returns_raw_bytes(self):
+        # Bexio's PDF endpoints return raw bytes but reject Accept: application/pdf
+        # with HTTP 415 — every request must ask for application/json (NOE-3277).
+        captured = []
+
+        def fake_urlopen(req, *a, **kw):
+            captured.append(req.headers.get("Accept"))
+            mock = MagicMock()
+            mock.read.return_value = b"%PDF-1.4 raw bytes"
+            mock.__enter__ = lambda s: s
+            mock.__exit__ = MagicMock(return_value=False)
+            return mock
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            data = self.client.get_pdf("/kb_invoice/47/pdf")
+
+        self.assertEqual(captured, ["application/json"])
+        self.assertEqual(data, b"%PDF-1.4 raw bytes")

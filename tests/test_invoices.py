@@ -274,7 +274,7 @@ class TestInvoicesPdf(unittest.TestCase):
             tmp = f.name
         os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
             return b"FAKEPDF"
 
         with patch("bexio.client.BexioClient._request", fake_request), \
@@ -294,7 +294,7 @@ class TestInvoicesPdf(unittest.TestCase):
         if os.path.exists(default_file):
             os.unlink(default_file)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, accept="application/json"):
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
             return b"FAKEPDF"
 
         with patch("bexio.client.BexioClient._request", fake_request), \
@@ -363,6 +363,33 @@ class TestInvoicesCreate(unittest.TestCase):
             self.assertIn("kb_invoice/show/id/200", out)
         finally:
             _os.unlink(tmp)
+
+    def test_contact_address_manual_reaches_payload(self):
+        body = dict(VALID_INVOICE_BODY,
+                    contact_address_manual="Firma AG\nBahnhofstrasse 1\n8001 Zürich")
+        with _tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            _json.dump(body, f)
+            tmp = f.name
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
+            captured.append((method, path, body))
+            return CREATED_INV
+
+        try:
+            with patch("bexio.client.BexioClient._request", fake_request), \
+                 patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "invoices", "create", "--file", tmp]), \
+                 patch("sys.stdout", io.StringIO()):
+                from bexio.cli import main
+                main()
+        finally:
+            _os.unlink(tmp)
+
+        self.assertEqual(captured[0][0], "POST")
+        self.assertEqual(captured[0][1], "/kb_invoice")
+        self.assertEqual(captured[0][2]["contact_address_manual"],
+                         "Firma AG\nBahnhofstrasse 1\n8001 Zürich")
 
     def test_rejects_markdown_in_header(self):
         bad = dict(VALID_INVOICE_BODY, header="**Bold**")

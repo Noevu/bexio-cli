@@ -177,6 +177,28 @@ class TestKbInvoice(unittest.TestCase):
                 "contact_id": 1, "user_id": 1, "title": "X",
             })
 
+    def test_contact_address_manual_accepted(self):
+        # The printed recipient address override — Bexio's writable field is
+        # contact_address_manual (contact_address itself is read-only). NOE-3277.
+        invoice = KbInvoice.model_validate({
+            "contact_id": 1, "user_id": 1, "title": "X",
+            "is_valid_from": "2026-05-04",
+            "contact_address_manual": "Firma AG\nBahnhofstrasse 1\n8001 Zürich",
+        })
+        self.assertEqual(
+            invoice.contact_address_manual,
+            "Firma AG\nBahnhofstrasse 1\n8001 Zürich",
+        )
+
+    def test_bare_address_field_still_rejected(self):
+        # 'address' is not a kb_invoice field — use contact_address_manual.
+        with self.assertRaises(ValidationError) as cm:
+            KbInvoice.model_validate({
+                "contact_id": 1, "user_id": 1, "title": "X",
+                "is_valid_from": "2026-05-04", "address": "Bahnhofstrasse 1",
+            })
+        self.assertIn("address", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
