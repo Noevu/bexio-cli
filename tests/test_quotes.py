@@ -1,5 +1,6 @@
 """Tests for quote commands."""
 
+import base64
 import io
 import json
 import os
@@ -171,8 +172,8 @@ class TestQuotesPdf(unittest.TestCase):
             tmp = f.name
         os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
-            return b"FAKEPDF"
+        def fake_request(self, method, path, params=None, body=None, base=None):
+            return {"content": base64.b64encode(b"FAKEPDF").decode()}
 
         with patch("bexio.client.BexioClient._request", fake_request), \
              patch("bexio.auth.get_token", return_value="FAKE"), \
@@ -191,8 +192,8 @@ class TestQuotesPdf(unittest.TestCase):
         if os.path.exists(default_file):
             os.unlink(default_file)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
-            return b"FAKEPDF"
+        def fake_request(self, method, path, params=None, body=None, base=None):
+            return {"content": base64.b64encode(b"FAKEPDF").decode()}
 
         with patch("bexio.client.BexioClient._request", fake_request), \
              patch("bexio.auth.get_token", return_value="FAKE"), \

@@ -132,15 +132,25 @@ class TestBexioClient(unittest.TestCase):
             result = self.client.post("/kb_invoice/1/send")
         self.assertEqual(result, {})
 
-    def test_get_pdf_sends_json_accept_and_returns_raw_bytes(self):
-        # Bexio's PDF endpoints return raw bytes but reject Accept: application/pdf
-        # with HTTP 415 — every request must ask for application/json (NOE-3277).
+    def test_get_pdf_decodes_base64_envelope(self):
+        # Bexio's PDF endpoints return a JSON envelope {name,size,mime,content(base64)},
+        # not raw bytes, and reject Accept: application/pdf with HTTP 415 — every
+        # request must ask for application/json (NOE-3277).
+        import base64
+
+        pdf_bytes = b"%PDF-1.5 real pdf bytes"
+        envelope = {
+            "name": "invoice_47.pdf",
+            "size": len(pdf_bytes),
+            "mime": "application/pdf",
+            "content": base64.b64encode(pdf_bytes).decode(),
+        }
         captured = []
 
         def fake_urlopen(req, *a, **kw):
             captured.append(req.headers.get("Accept"))
             mock = MagicMock()
-            mock.read.return_value = b"%PDF-1.4 raw bytes"
+            mock.read.return_value = json.dumps(envelope).encode()
             mock.__enter__ = lambda s: s
             mock.__exit__ = MagicMock(return_value=False)
             return mock
@@ -149,4 +159,19 @@ class TestBexioClient(unittest.TestCase):
             data = self.client.get_pdf("/kb_invoice/47/pdf")
 
         self.assertEqual(captured, ["application/json"])
-        self.assertEqual(data, b"%PDF-1.4 raw bytes")
+        self.assertEqual(data, pdf_bytes)
+
+
+class TestVersion(unittest.TestCase):
+    def test_version_matches_pyproject(self):
+        # The `--version` flag reads bexio.__version__; keep it in lockstep with
+        # pyproject so `bexio --version` is a trustworthy install gate (NOE-3277).
+        import tomllib
+        from pathlib import Path
+
+        import bexio
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            declared = tomllib.load(f)["project"]["version"]
+        self.assertEqual(bexio.__version__, declared)

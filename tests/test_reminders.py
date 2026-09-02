@@ -1,5 +1,6 @@
 """Tests for reminder commands."""
 
+import base64
 import io
 import json
 import os
@@ -202,9 +203,9 @@ class TestRemindersPdf(unittest.TestCase):
         if os.path.exists(tmp):
             os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
-            if raw:
-                return b"FAKEPDF"
+        def fake_request(self, method, path, params=None, body=None, base=None):
+            if path.endswith("/pdf"):
+                return {"content": base64.b64encode(b"FAKEPDF").decode()}
             return REMINDER
 
         buf = io.StringIO()
@@ -225,9 +226,9 @@ class TestRemindersPdf(unittest.TestCase):
         if os.path.exists(default_file):
             os.unlink(default_file)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
-            if raw:
-                return b"FAKEPDF"
+        def fake_request(self, method, path, params=None, body=None, base=None):
+            if path.endswith("/pdf"):
+                return {"content": base64.b64encode(b"FAKEPDF").decode()}
             return REMINDER
 
         buf = io.StringIO()
@@ -246,9 +247,9 @@ class TestRemindersPdf(unittest.TestCase):
         if os.path.exists(tmp):
             os.unlink(tmp)
 
-        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
-            if raw:
-                return b"FAKEPDF"
+        def fake_request(self, method, path, params=None, body=None, base=None):
+            if path.endswith("/pdf"):
+                return {"content": base64.b64encode(b"FAKEPDF").decode()}
             return REMINDER
 
         buf = io.StringIO()

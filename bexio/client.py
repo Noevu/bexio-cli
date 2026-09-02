@@ -1,5 +1,6 @@
 """Bexio REST API client (stdlib only, no requests)."""
 
+import base64
 import json
 import sys
 import urllib.error
@@ -24,9 +25,11 @@ class BexioClient:
         return self._request("GET", path, params=params, base="https://api.bexio.com/4.0")
 
     def get_pdf(self, path: str) -> bytes:
-        # Bexio PDF endpoints return raw bytes but 415 on Accept: application/pdf —
-        # they require the same application/json Accept as every other call (NOE-3277).
-        return self._request("GET", path, raw=True)
+        # Bexio PDF endpoints return a JSON envelope {name,size,mime,content(base64)},
+        # not raw bytes, and 415 on Accept: application/pdf — they require the same
+        # application/json Accept as every other call (NOE-3277). Decode content → PDF.
+        env = self._request("GET", path)
+        return base64.b64decode(env["content"])
 
     def post(self, path: str, body: dict | None = None) -> Any:
         return self._request("POST", path, body=body)
@@ -55,7 +58,7 @@ class BexioClient:
     def delete_v4(self, path: str) -> Any:
         return self._request("DELETE", path, base="https://api.bexio.com/4.0")
 
-    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None, raw: bool = False) -> Any:
+    def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None, base: str | None = None) -> Any:
         url = (base or BASE_URL) + path
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
@@ -73,8 +76,6 @@ class BexioClient:
         try:
             with urllib.request.urlopen(req) as resp:
                 payload = resp.read()
-                if raw:
-                    return payload
                 return json.loads(payload) if payload else {}
         except urllib.error.HTTPError as e:
             msg = e.read().decode(errors="replace")
