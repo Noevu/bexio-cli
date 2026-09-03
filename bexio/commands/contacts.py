@@ -24,6 +24,9 @@ _EDIT_CARRY_SCALAR = [
 ]
 _EDIT_CARRY_LIST = ["contact_group_ids", "contact_branch_ids"]
 
+# Read back as 0 when unset, rejected as 0 on write.
+_ZERO_MEANS_UNSET = {"salutation_id"}
+
 
 def _add_address_args(parser):
     for flag, dest, help_text in _ADDRESS_ARGS:
@@ -201,8 +204,14 @@ def _edit(args, client, json_flag):
     body = {}
     for field in _EDIT_CARRY_SCALAR:
         value = existing.get(field)
-        if value is not None:
-            body[field] = value
+        if value is None:
+            continue
+        # A contact without a salutation reads back as 0, but Bexio refuses 0 on
+        # write ("Diese Eingabe ist nicht korrekt", 422). Echoing the GET back
+        # therefore broke the edit for 243 of 251 live contacts (2026-09-02).
+        if field in _ZERO_MEANS_UNSET and value == 0:
+            continue
+        body[field] = value
     for field in _EDIT_CARRY_LIST:
         value = existing.get(field)
         if value:

@@ -246,6 +246,38 @@ class TestContactsEdit(unittest.TestCase):
         calls = self._capture_edit(["--email-second", "beni.zweit@test.ch"])
         self.assertEqual(calls[1][2]["mail"], "info@aihk.ch")
 
+
+class TestContactsEditSalutationZero(unittest.TestCase):
+    """Bexio returns `salutation_id: 0` for a contact without a salutation but
+    refuses to accept it on write ("Diese Eingabe ist nicht korrekt", 422). Echoing
+    the GET back therefore breaks the edit for 243 of 251 live contacts — measured
+    2026-09-02, found only by running the command against the real API."""
+
+    def _capture_edit(self, argv_tail):
+        calls = []
+        contact = dict(EXISTING_CONTACT, salutation_id=0)
+
+        def fake_request(self, method, path, params=None, body=None, base=None, raw=False):
+            calls.append((method, path, body))
+            return dict(contact) if method == "GET" else {"id": 246}
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "edit", "246"] + argv_tail), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+        return calls
+
+    def test_zero_salutation_is_not_echoed_back(self):
+        calls = self._capture_edit(["--email", "neu@test.ch"])
+        self.assertNotIn("salutation_id", calls[1][2])
+
+    def test_the_rest_of_the_record_still_travels(self):
+        body = self._capture_edit(["--email", "neu@test.ch"])[1][2]
+        self.assertEqual(body["name_1"], "AIHK")
+        self.assertEqual(body["mail"], "neu@test.ch")
+
     def test_existing_fields_preserved_full_replace(self):
         # Only the email changes; nothing else may be wiped by the replacement post.
         calls = self._capture_edit(["--email", "new@test.ch"])
