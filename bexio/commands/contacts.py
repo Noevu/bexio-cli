@@ -87,6 +87,28 @@ def handle(args, client, json_flag):
         sys.exit("Usage: bexio contacts {list|show|search|create|edit|delete}")
 
 
+# Bexio führt Namen ausschliesslich in `name_1` und `name_2`. Die Felder `name`,
+# `firstname` und `lastname` kommen in KEINER Antwort vor — sie hier zu lesen
+# ergab stumm eine leere Spalte, und `field: "name"` in der Suche quittierte Bexio
+# mit HTTP 400 ("The following search parameters could not have been applied").
+# Gemessen am 2026-09-02 gegen die Live-API: `name_1` und `name_2` sind gültige
+# Suchfelder, `name` ist keines.
+CONTACT_TYPE_PERSON = 2
+
+
+def _display_name(contact: dict) -> str:
+    """Anzeigename aus den Feldern, die Bexio wirklich liefert.
+
+    Firma: `name_1` ist der Firmenname, `name_2` ein Zusatz.
+    Person: `name_1` ist der NACHname, `name_2` der Vorname — deshalb gedreht.
+    """
+    n1 = (contact.get("name_1") or "").strip()
+    n2 = (contact.get("name_2") or "").strip()
+    if contact.get("contact_type_id") == CONTACT_TYPE_PERSON and n2:
+        return f"{n2} {n1}".strip()
+    return " ".join(part for part in (n1, n2) if part)
+
+
 def _list(args, client, json_flag):
     contacts = client.get("/contact", params={"limit": args.limit})
     if not isinstance(contacts, list):
@@ -95,7 +117,7 @@ def _list(args, client, json_flag):
         print_json(contacts)
         return
     for c in contacts:
-        name = c.get("name", "") or f"{c.get('firstname', '')} {c.get('lastname', '')}".strip()
+        name = _display_name(c)
         email = (c.get("mail") or "")[:36]
         print(f"{c['id']:>5}  {name[:40]:<40}  {email}")
 
@@ -105,7 +127,7 @@ def _show(args, client, json_flag):
     if json_flag:
         print_json(c)
         return
-    name = c.get("name", "") or f"{c.get('firstname', '')} {c.get('lastname', '')}".strip()
+    name = _display_name(c)
     print(f"ID:      {c['id']}")
     print(f"Name:    {name}")
     print(f"Email:   {c.get('mail', '—')}")
@@ -144,11 +166,21 @@ def _create(args, client, json_flag):
 
 
 def _search(args, client, json_flag):
-    results = client.post("/contact/search", body=[
-        {"field": "name", "value": args.query, "criteria": "like"}
-    ])
-    if not isinstance(results, list):
-        sys.exit(f"Unexpected response: {results}")
+    # Zwei Abfragen statt einer: mehrere Kriterien in EINEM Rumpf verknüpft Bexio
+    # mit UND, gesucht ist aber ODER — sonst findet «Benedikt» nie eine Person,
+    # deren Vorname in `name_2` steht, und «Vogel» nie eine Firma in `name_1`.
+    results: list = []
+    seen: set = set()
+    for field in ("name_1", "name_2"):
+        hits = client.post("/contact/search", body=[
+            {"field": field, "value": args.query, "criteria": "like"}
+        ])
+        if not isinstance(hits, list):
+            sys.exit(f"Unexpected response: {hits}")
+        for c in hits:
+            if c.get("id") not in seen:
+                seen.add(c.get("id"))
+                results.append(c)
     if json_flag:
         print_json(results)
         return
@@ -156,8 +188,7 @@ def _search(args, client, json_flag):
         print("No contacts found.")
         return
     for c in results:
-        name = c.get("name", "") or f"{c.get('firstname', '')} {c.get('lastname', '')}".strip()
-        print(f"{c['id']:>5}  {name[:40]:<40}  {c.get('mail', '')}")
+        print(f"{c['id']:>5}  {_display_name(c)[:40]:<40}  {c.get('mail', '')}")
 
 
 def _edit(args, client, json_flag):

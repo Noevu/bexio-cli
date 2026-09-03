@@ -7,20 +7,26 @@ from unittest.mock import patch
 
 from tests.helpers import capture_with_responses
 
+# Feldnamen wie in der echten Antwort von `GET /2.0/contact/{id}`, am 2026-09-02
+# gegen die Live-API gemessen. Die frühere Fassung führte `name`, `firstname` und
+# `lastname` — Felder, die Bexio NIE zurückgibt. Dadurch waren diese Tests grün,
+# während `contacts list`, `show` und `search` in der Praxis eine leere Namensspalte
+# zeigten und die Suche mit HTTP 400 abbrach.
 CONTACT = {
     "id": 246,
-    "name": "Ausgleichskasse der AIHK",
-    "firstname": None,
-    "lastname": None,
+    "contact_type_id": 1,
+    "name_1": "Ausgleichskasse der AIHK",
+    "name_2": "",
     "mail": "info@aihk.ch",
     "phone_fixed": "+41 62 837 97 00",
 }
 
+# Person: `name_1` ist der NACHname, `name_2` der Vorname.
 PERSON = {
     "id": 245,
-    "name": None,
-    "firstname": "Anna",
-    "lastname": "Imperia",
+    "contact_type_id": 2,
+    "name_1": "Imperia",
+    "name_2": "Anna",
     "mail": "anna@aihk.ch",
     "phone_fixed": "",
 }
@@ -74,6 +80,27 @@ class TestContactsSearch(unittest.TestCase):
         self.assertEqual(method, "POST")
         self.assertIn("contact/search", path)
         self.assertEqual(body[0]["value"], "AIHK")
+        # `name` ist KEIN gültiges Suchfeld — Bexio antwortet HTTP 400
+        # ("The following search parameters could not have been applied").
+        self.assertEqual(body[0]["field"], "name_1")
+
+    def test_searches_both_name_fields(self):
+        """Ein Vorname steht in `name_2` — eine Suche nur über `name_1` fände ihn nie."""
+        captured = []
+
+        def fake_request(self, method, path, params=None, body=None):
+            captured.append((method, path, body))
+            return []
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio", "contacts", "search", "Anna"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+
+        felder = [body[0]["field"] for _m, _p, body in captured]
+        self.assertEqual(felder, ["name_1", "name_2"])
 
     def test_empty_results_message(self):
         out = capture_with_responses(["contacts", "search", "nobody"], [[]])

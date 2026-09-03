@@ -30,13 +30,13 @@ class TestGetToken(unittest.TestCase):
     def test_no_token_exits(self):
         mock_kr = MagicMock()
         mock_kr.get_password.return_value = None
-        with patch.dict(os.environ, {"BEXIO_API_TOKEN": ""}), \
+        with patch.dict(os.environ, {"BEXIO_API_TOKEN": ""}, clear=True), \
              patch.dict(sys.modules, {"keyring": mock_kr}):
             with self.assertRaises(SystemExit):
                 get_token()
 
     def test_keyring_import_error_falls_through(self):
-        with patch.dict(os.environ, {"BEXIO_API_TOKEN": ""}), \
+        with patch.dict(os.environ, {"BEXIO_API_TOKEN": ""}, clear=True), \
              patch("builtins.__import__", side_effect=ImportError):
             with self.assertRaises(SystemExit):
                 get_token()
@@ -54,7 +54,7 @@ class TestAuthStatus(unittest.TestCase):
         mock_kr = MagicMock()
         mock_kr.get_password.return_value = None
         buf = io.StringIO()
-        with patch.dict(os.environ, {"BEXIO_API_TOKEN": ""}), \
+        with patch.dict(os.environ, {"BEXIO_API_TOKEN": ""}, clear=True), \
              patch.dict(sys.modules, {"keyring": mock_kr}), \
              patch("sys.stdout", buf):
             cmd_auth_status(None)
