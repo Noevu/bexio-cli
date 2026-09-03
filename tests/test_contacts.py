@@ -236,6 +236,16 @@ class TestContactsEdit(unittest.TestCase):
         calls = self._capture_edit(["--email", "new@test.ch"])
         self.assertEqual(calls[1][2]["mail"], "new@test.ch")
 
+    def test_second_email_is_settable(self):
+        # A person can carry two addresses; `mail_second` was already preserved on
+        # echo-back but had no flag, so the only way to set it was the raw API.
+        calls = self._capture_edit(["--email-second", "beni.zweit@test.ch"])
+        self.assertEqual(calls[1][2]["mail_second"], "beni.zweit@test.ch")
+
+    def test_second_email_leaves_the_primary_alone(self):
+        calls = self._capture_edit(["--email-second", "beni.zweit@test.ch"])
+        self.assertEqual(calls[1][2]["mail"], "info@aihk.ch")
+
     def test_existing_fields_preserved_full_replace(self):
         # Only the email changes; nothing else may be wiped by the replacement post.
         calls = self._capture_edit(["--email", "new@test.ch"])

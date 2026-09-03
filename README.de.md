@@ -124,6 +124,7 @@ bexio invoices list --status draft       nur Entwürfe
 bexio invoices show 47                   Details von Rechnung 47
 bexio invoices search "Muster AG"        Rechnungen nach Name suchen
 bexio invoices create --file body.json   Rechnung aus JSON-Body erstellen
+bexio invoices update 47 --valid-to 2026-09-25   Datum, Zahlungsfrist oder Titel ändern
 bexio invoices pdf 47                    Rechnung 47 als PDF herunterladen
 bexio invoices send 47 --to kunde@firma.ch --subject "Rechnung 47" \
   --message "Guten Tag\n\nIhre Rechnung: [Network Link]"   verschickt wirklich eine E-Mail
@@ -191,6 +192,7 @@ bexio contacts list                      alle Kontakte anzeigen
 bexio contacts search "Muster"           Kontakte nach Name suchen
 bexio contacts show 5                    Details von Kontakt 5
 bexio contacts create --name "Muster AG" --email info@muster.ch --street Bahnhofstrasse --house-number 1 --postcode 8001 --city Zürich --country-id 1
+bexio contacts edit 5 --email-second zweite@muster.ch
 bexio contacts edit 5 --email neu@muster.ch --street Bahnhofstrasse --house-number 1 --postcode 8001 --city Zürich --country-id 1
 bexio contacts delete 5
 ```

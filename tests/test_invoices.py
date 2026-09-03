@@ -423,3 +423,80 @@ class TestInvoicesCreate(unittest.TestCase):
             self.assertIn("is_valid_from", str(cm.exception))
         finally:
             _os.unlink(tmp)
+
+
+UPDATE_INVOICE = {
+    "id": 408,
+    "document_nr": "01.09.2026 2307-000190",
+    "title": "Service Paket",
+    "contact_id": 236,
+    "contact_sub_id": 235,
+    "user_id": 1,
+    "language_id": 1,
+    "bank_account_id": 1,
+    "currency_id": 1,
+    "payment_type_id": 4,
+    "mwst_type": 0,
+    "mwst_is_net": True,
+    "is_valid_from": "2026-09-01",
+    "is_valid_to": "2026-09-14",
+    "total": "135.150000",
+    "positions": [{"type": "KbPositionCustom", "text": "Seed", "unit_price": "125.00"}],
+}
+
+
+class TestInvoiceUpdate(unittest.TestCase):
+    """`invoices update` changes header fields on an existing invoice.
+
+    Bexio's edit endpoint refuses a body carrying `positions` with 422, so the
+    line items are structurally safe — but only as long as we never send them.
+    """
+
+    def _run(self, argv):
+        calls = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None,
+                         accept="application/json"):
+            calls.append((method, path, body))
+            return UPDATE_INVOICE
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.argv", ["bexio"] + argv), \
+             patch("sys.stdout", io.StringIO()) as buf:
+            from bexio.cli import main
+            try:
+                main()
+            except SystemExit:
+                pass
+        return calls, buf.getvalue()
+
+    def test_reads_then_writes_the_same_invoice(self):
+        calls, _ = self._run(["invoices", "update", "408", "--valid-to", "2026-09-25"])
+        methods = [(m, p) for m, p, _ in calls]
+        self.assertEqual(methods[0], ("GET", "/kb_invoice/408"))
+        self.assertEqual(methods[1], ("POST", "/kb_invoice/408"))
+
+    def test_overrides_only_the_named_field(self):
+        calls, _ = self._run(["invoices", "update", "408", "--valid-to", "2026-09-25"])
+        body = calls[1][2]
+        self.assertEqual(body["is_valid_to"], "2026-09-25")
+        self.assertEqual(body["is_valid_from"], "2026-09-01")
+        self.assertEqual(body["title"], "Service Paket")
+
+    def test_never_sends_positions(self):
+        calls, _ = self._run(["invoices", "update", "408", "--valid-to", "2026-09-25"])
+        self.assertNotIn("positions", calls[1][2])
+
+    def test_carries_the_header_fields_bexio_requires(self):
+        calls, _ = self._run(["invoices", "update", "408", "--title", "Neu"])
+        body = calls[1][2]
+        for field in ("contact_id", "user_id", "language_id", "bank_account_id",
+                      "currency_id", "payment_type_id", "mwst_type"):
+            self.assertIn(field, body, f"{field} missing — Bexio rejects the write")
+        self.assertEqual(body["title"], "Neu")
+
+    def test_refuses_a_call_that_changes_nothing(self):
+        calls, out = self._run(["invoices", "update", "408"])
+        self.assertEqual(calls, [], "no field given — must not touch the API")
+        self.assertIn("no field", out.lower())

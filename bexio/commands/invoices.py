@@ -24,6 +24,20 @@ def register(sub):
     create.add_argument("--file", "-f", required=True,
                         help="Path to JSON body file, or '-' to read stdin")
 
+    update = s.add_parser(
+        "update",
+        help="Change header fields on an existing invoice",
+        description="Edits date, payment term or title. Bexio's edit endpoint takes "
+                    "header fields only — it refuses a body carrying `positions` with "
+                    "422, so line items and totals cannot be touched from here.",
+    )
+    update.add_argument("id", type=int)
+    update.add_argument("--title")
+    update.add_argument("--valid-from", dest="is_valid_from",
+                        help="Invoice date (YYYY-MM-DD)")
+    update.add_argument("--valid-to", dest="is_valid_to",
+                        help="Payment term / due date (YYYY-MM-DD)")
+
     send = s.add_parser(
         "send",
         help="Send invoice by email (really sends — recipient must be given)",
@@ -78,6 +92,8 @@ def handle(args, client, json_flag):
         _show(args, client, json_flag)
     elif args.action == "create":
         _create(args, client, json_flag)
+    elif args.action == "update":
+        _update(args, client, json_flag)
     elif args.action == "send":
         _send(args, client, json_flag)
     elif args.action == "mark-sent":
@@ -97,7 +113,7 @@ def handle(args, client, json_flag):
     elif args.action == "revert-issue":
         _revert_issue(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio invoices {list|show|create|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
+        sys.exit("Usage: bexio invoices {list|show|create|update|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
 
 
 def _read_body(path: str) -> dict:
@@ -134,6 +150,40 @@ def _create(args, client, json_flag):
     iid = result.get("id")
     print(f"Invoice #{iid} ({result.get('document_nr', '—')}) created — {result.get('title', '')}")
     print(f"  https://office.bexio.com/index.php/kb_invoice/show/id/{iid}")
+
+
+# Header fields Bexio's edit endpoint accepts. `positions` is deliberately absent:
+# sending it is refused with 422 ("Widget schema does not include ... positions"),
+# which is what makes this command safe — the line items cannot be reached from here.
+_UPDATE_CARRY = [
+    "title", "contact_id", "contact_sub_id", "user_id", "pr_project_id",
+    "language_id", "bank_account_id", "currency_id", "payment_type_id",
+    "header", "footer", "mwst_type", "mwst_is_net", "is_valid_from", "is_valid_to",
+    "reference", "api_reference", "template_slug",
+]
+
+
+def _update(args, client, json_flag):
+    changes = {field: getattr(args, field) for field in
+               ("title", "is_valid_from", "is_valid_to")
+               if getattr(args, field) is not None}
+    if not changes:
+        print("Nothing to update — no field given. "
+              "Pass --title, --valid-from or --valid-to.")
+        return
+
+    # The edit replaces the header, so an omitted field is a wiped field: read the
+    # live invoice, carry its header over, then overlay only what was asked for.
+    existing = client.get(f"/kb_invoice/{args.id}")
+    body = {f: existing[f] for f in _UPDATE_CARRY if existing.get(f) is not None}
+    body.update(changes)
+
+    result = client.post(f"/kb_invoice/{args.id}", body=body)
+    if json_flag:
+        print_json(result)
+        return
+    changed = ", ".join(f"{k}={v}" for k, v in sorted(changes.items()))
+    print(f"Invoice {args.id} updated ({changed}).")
 
 
 def _list(args, client, json_flag):

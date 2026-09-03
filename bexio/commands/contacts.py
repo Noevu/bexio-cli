@@ -61,6 +61,8 @@ def register(sub):
     edit.add_argument("--firstname", help="First name")
     edit.add_argument("--lastname", help="Last name")
     edit.add_argument("--email", dest="mail")
+    edit.add_argument("--email-second", dest="mail_second",
+                      help="Second address (a person often has two)")
     edit.add_argument("--phone", dest="phone_fixed")
     _add_address_args(edit)
 
@@ -217,6 +219,8 @@ def _edit(args, client, json_flag):
         body["name_2"] = args.firstname
     if args.mail is not None:
         body["mail"] = args.mail
+    if args.mail_second is not None:
+        body["mail_second"] = args.mail_second
     if args.phone_fixed is not None:
         body["phone_fixed"] = args.phone_fixed
     for _flag, dest, _help in _ADDRESS_ARGS:
