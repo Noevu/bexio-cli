@@ -101,6 +101,13 @@ def handle(args, client, json_flag):
 CONTACT_TYPE_PERSON = 2
 
 
+# Die DEUTSCHE Route. `/index.php/contact/show/id/…` antwortet 404, `/kontakt/…`
+# mit 302 (gemessen 2026-09-03). Die anderen Module tragen ihre API-Namen
+# (`kb_order`, `kb_invoice`, `kb_offer`) und lösen damit auf — nur der Kontakt
+# heisst in der Oberfläche anders als in der Schnittstelle.
+CONTACT_URL = "https://office.bexio.com/index.php/kontakt/show/id/"
+
+
 def _display_name(contact: dict) -> str:
     """Anzeigename aus den Feldern, die Bexio wirklich liefert.
 
@@ -137,7 +144,7 @@ def _show(args, client, json_flag):
     print(f"Name:    {name}")
     print(f"Email:   {c.get('mail', '—')}")
     print(f"Phone:   {c.get('phone_fixed', '—')}")
-    print(f"URL:     https://office.bexio.com/index.php/contact/show/id/{c['id']}")
+    print(f"URL:     {CONTACT_URL}{c['id']}")
 
 
 def _create(args, client, json_flag):
@@ -167,7 +174,7 @@ def _create(args, client, json_flag):
         print_json(result)
         return
     print(f"Contact #{result.get('id')} created")
-    print(f"  https://office.bexio.com/index.php/contact/show/id/{result.get('id')}")
+    print(f"  {CONTACT_URL}{result.get('id')}")
 
 
 def _search(args, client, json_flag):

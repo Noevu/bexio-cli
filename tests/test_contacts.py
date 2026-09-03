@@ -56,6 +56,13 @@ class TestContactsShow(unittest.TestCase):
         self.assertIn("info@aihk.ch", out)
         self.assertIn("office.bexio.com", out)
 
+    def test_url_uses_the_german_route(self):
+        # `/index.php/contact/show/id/…` antwortet 404, nur `/kontakt/…` löst auf
+        # (302, gemessen 2026-09-03). Der gedruckte Link war bis 0.3.3 tot.
+        out = capture_with_responses(["contacts", "show", "246"], [CONTACT])
+        self.assertIn("/index.php/kontakt/show/id/246", out)
+        self.assertNotIn("/index.php/contact/show/id/", out)
+
     def test_person_name_from_parts(self):
         out = capture_with_responses(["contacts", "show", "245"], [PERSON])
         self.assertIn("Anna Imperia", out)
