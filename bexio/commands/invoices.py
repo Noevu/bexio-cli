@@ -2,11 +2,31 @@
 
 import json
 import sys
-from bexio.models import KbInvoice
+
+from pydantic import TypeAdapter
+
+from bexio.models import KbInvoice, Position
 from bexio.output import print_json
 
 STATUS_MAP = {"draft": 1, "open": 7, "partial": 8, "paid": 9, "cancelled": 16}
 STATUS_LABELS = {v: k.title() for k, v in STATUS_MAP.items()}
+
+# Positions live at a per-type endpoint under the document — the `type` in the
+# body is implied by the path, so it is stripped before the POST. `parent_id`
+# nests a position under a subposition, and Bexio honours it only here, on
+# create (its edit endpoint drops it silently). See bexio-teilrechnung §Step 6b.
+_POSITION_ENDPOINTS = {
+    "KbPositionCustom": "kb_position_custom",
+    "KbPositionArticle": "kb_position_article",
+    "KbPositionText": "kb_position_text",
+    "KbPositionSubtotal": "kb_position_subtotal",
+    "KbPositionDiscount": "kb_position_discount",
+    "KbPositionPagebreak": "kb_position_pagebreak",
+    "KbPositionSubposition": "kb_position_subposition",
+}
+# `delete` takes the short suffix directly — it IS the endpoint segment.
+POSITION_TYPES = [e.removeprefix("kb_position_") for e in _POSITION_ENDPOINTS.values()]
+_POSITION_ADAPTER = TypeAdapter(Position)
 
 
 def register(sub):
@@ -37,6 +57,34 @@ def register(sub):
                         help="Invoice date (YYYY-MM-DD)")
     update.add_argument("--valid-to", dest="is_valid_to",
                         help="Payment term / due date (YYYY-MM-DD)")
+
+    positions = s.add_parser(
+        "positions",
+        help="Add or delete line items (positions) on an existing invoice",
+        description="Positions sit at a per-type endpoint under the invoice. "
+                    "`add` routes by the `type` in the JSON body and is the only "
+                    "way to set `parent_id` (nest under a subposition) — the edit "
+                    "endpoint ignores it. `delete` needs the position's type.",
+    )
+    ps = positions.add_subparsers(dest="positions_action")
+
+    padd = ps.add_parser(
+        "add",
+        help="Add a position from a JSON body",
+        description="The body's `type` (KbPositionCustom, KbPositionSubposition, …) "
+                    "selects the endpoint and is stripped before the POST. Set "
+                    "`parent_id` to nest under a subposition.",
+    )
+    padd.add_argument("id", type=int, help="Invoice id")
+    padd.add_argument("--file", "-f", required=True,
+                      help="Path to JSON body file, or '-' to read stdin")
+
+    pdel = ps.add_parser("delete", help="Delete a position by id")
+    pdel.add_argument("id", type=int, help="Invoice id")
+    pdel.add_argument("position_id", type=int, help="Id of the position to delete")
+    pdel.add_argument("--type", "-t", dest="position_type", required=True,
+                      choices=POSITION_TYPES,
+                      help="Position type — selects the per-type endpoint")
 
     send = s.add_parser(
         "send",
@@ -94,6 +142,8 @@ def handle(args, client, json_flag):
         _create(args, client, json_flag)
     elif args.action == "update":
         _update(args, client, json_flag)
+    elif args.action == "positions":
+        _positions(args, client, json_flag)
     elif args.action == "send":
         _send(args, client, json_flag)
     elif args.action == "mark-sent":
@@ -113,7 +163,7 @@ def handle(args, client, json_flag):
     elif args.action == "revert-issue":
         _revert_issue(args, client, json_flag)
     else:
-        sys.exit("Usage: bexio invoices {list|show|create|update|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
+        sys.exit("Usage: bexio invoices {list|show|create|update|positions|send|mark-sent|cancel|issue|search|delete|copy|pdf|revert-issue}")
 
 
 def _read_body(path: str) -> dict:
@@ -184,6 +234,39 @@ def _update(args, client, json_flag):
         return
     changed = ", ".join(f"{k}={v}" for k, v in sorted(changes.items()))
     print(f"Invoice {args.id} updated ({changed}).")
+
+
+def _positions(args, client, json_flag):
+    if args.positions_action == "add":
+        _positions_add(args, client, json_flag)
+    elif args.positions_action == "delete":
+        _positions_delete(args, client, json_flag)
+    else:
+        sys.exit("Usage: bexio invoices positions {add|delete}")
+
+
+def _positions_add(args, client, json_flag):
+    body = _read_body(args.file)
+    try:
+        position = _POSITION_ADAPTER.validate_python(body)
+    except Exception as e:
+        sys.exit(f"Invalid position body:\n{_format_validation_errors(e)}")
+    payload = position.model_dump(mode="json", exclude_none=True)
+    payload.pop("type", None)  # the endpoint implies the type
+    endpoint = _POSITION_ENDPOINTS[position.type]
+    result = client.post(f"/kb_invoice/{args.id}/{endpoint}", body=payload)
+    if json_flag:
+        print_json(result)
+        return
+    parent = payload.get("parent_id")
+    nested = f" under position {parent}" if parent else ""
+    print(f"Position {result.get('id')} added to invoice {args.id}{nested}.")
+
+
+def _positions_delete(args, client, json_flag):
+    endpoint = f"kb_position_{args.position_type}"
+    client.delete(f"/kb_invoice/{args.id}/{endpoint}/{args.position_id}")
+    print(f"Position {args.position_id} deleted from invoice {args.id}.")
 
 
 def _list(args, client, json_flag):

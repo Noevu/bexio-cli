@@ -125,6 +125,8 @@ bexio invoices show 47                   Details von Rechnung 47
 bexio invoices search "Muster AG"        Rechnungen nach Name suchen
 bexio invoices create --file body.json   Rechnung aus JSON-Body erstellen
 bexio invoices update 47 --valid-to 2026-09-25   Datum, Zahlungsfrist oder Titel ändern
+bexio invoices positions add 47 --file pos.json   Position hinzufügen (Typ steckt im JSON)
+bexio invoices positions delete 47 88 --type custom   Position 88 aus Rechnung 47 löschen
 bexio invoices pdf 47                    Rechnung 47 als PDF herunterladen
 bexio invoices send 47 --to kunde@firma.ch --subject "Rechnung 47" \
   --message "Guten Tag\n\nIhre Rechnung: [Network Link]"   verschickt wirklich eine E-Mail
@@ -140,6 +142,13 @@ nichts. `--attach-pdf` hängt das Rechnungs-PDF an; HTML im `--message` wird als
 zugestellt, und Bexio setzt weder Kopf noch Logo noch Fusszeile dazu — der Text gehört ganz
 dir, womit eigene Vorlagen pro Kunde möglich werden. Hintergrund:
 [docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md](docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md).
+
+`positions add` bearbeitet die Positionen einer bestehenden Rechnung. Der JSON-Body trägt
+einen `type` (`KbPositionCustom`, `KbPositionSubposition`, `KbPositionDiscount`, …), der den
+passenden Endpunkt wählt. Für Gruppen (Sammelpositionen) zuerst eine `KbPositionSubposition`
+anlegen, dann jedes Kind mit `"parent_id": <subposition-id>` — `parent_id` wirkt nur beim
+Anlegen; der Edit-Endpunkt von Bexio ignoriert es still. `delete` löscht eine Position per
+id und braucht ihren `--type`.
 
 Weitere Status-Filter: `partial` (teilweise bezahlt), `paid` (bezahlt), `cancelled` (storniert)
 

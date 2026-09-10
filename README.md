@@ -126,6 +126,8 @@ bexio invoices show 47                   show full details of invoice 47
 bexio invoices search "Muster AG"        find invoices by name
 bexio invoices create --file body.json   create an invoice from a JSON body
 bexio invoices update 47 --valid-to 2026-09-25   change date, payment term or title
+bexio invoices positions add 47 --file pos.json   add a line item (JSON carries its type)
+bexio invoices positions delete 47 88 --type custom   delete position 88 from invoice 47
 bexio invoices pdf 47                    download invoice 47 as PDF
 bexio invoices send 47 --to kunde@firma.ch --subject "Rechnung 47" \
   --message "Guten Tag\n\nIhre Rechnung: [Network Link]"   really emails the recipient
@@ -141,6 +143,13 @@ the invoice PDF; HTML in `--message` is delivered as HTML, and Bexio adds no hea
 footer of its own — the text is entirely yours, which makes per-client templates possible.
 Background:
 [docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md](docs/solutions/integration-issues/kb-invoice-send-requires-body-and-network-placeholder-2026-08-06.md).
+
+`positions add` edits the line items on an existing invoice. The JSON body carries a
+`type` (`KbPositionCustom`, `KbPositionSubposition`, `KbPositionDiscount`, …) that selects
+the right endpoint. To build groups (Sammelpositionen), create a `KbPositionSubposition`
+first, then add each child with `"parent_id": <subposition-id>` — `parent_id` is honoured
+only on create; Bexio's edit endpoint ignores it. `delete` removes a position by id and
+needs its `--type`.
 
 Other status filters: `partial` (partially paid), `paid`, `cancelled`
 

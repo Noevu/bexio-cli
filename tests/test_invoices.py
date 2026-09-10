@@ -500,3 +500,186 @@ class TestInvoiceUpdate(unittest.TestCase):
         calls, out = self._run(["invoices", "update", "408"])
         self.assertEqual(calls, [], "no field given — must not touch the API")
         self.assertIn("no field", out.lower())
+
+
+# ─── invoices positions add / delete ─────────────────────────────────────
+#
+# Positions live at per-type endpoints under a document. Bexio's full-body
+# create and its position *edit* endpoint both ignore `parent_id`, so the only
+# way to build Sammelpositionen is: create the subposition, then create each
+# child with `parent_id` on the CREATE body (bexio-teilrechnung § Step 6b).
+
+CUSTOM_POS_BODY = {
+    "type": "KbPositionCustom",
+    "text": "<strong>Konzept</strong><br />Analyse",
+    "amount": "1", "unit_id": 1, "unit_price": "1250.00",
+    "tax_id": 52, "account_id": 158,
+}
+CREATED_POS = {"id": 777, "text": "<strong>Konzept</strong>", "amount": "1"}
+
+
+def _positions_calls(argv_tail, response):
+    """Run `invoices positions …`, capturing (method, path, body) + stdout.
+
+    SystemExit propagates (argparse / validation errors), so error paths can
+    assertRaises around this helper — matching TestInvoiceSend._capture_send.
+    """
+    calls = []
+
+    def fake_request(self, method, path, params=None, body=None, base=None,
+                     accept="application/json"):
+        calls.append((method, path, body))
+        return response
+
+    buf = io.StringIO()
+    with patch("bexio.client.BexioClient._request", fake_request), \
+         patch("bexio.auth.get_token", return_value="FAKE"), \
+         patch("sys.argv", ["bexio", "invoices", "positions"] + argv_tail), \
+         patch("sys.stdout", buf):
+        from bexio.cli import main
+        main()
+    return calls, buf.getvalue()
+
+
+def _write_body(body) -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(body, f)
+        return f.name
+
+
+class TestInvoicePositionsAdd(unittest.TestCase):
+    def test_posts_custom_to_per_type_endpoint(self):
+        tmp = _write_body(CUSTOM_POS_BODY)
+        try:
+            calls, _ = _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+        finally:
+            os.unlink(tmp)
+        method, path, _ = calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/kb_invoice/408/kb_position_custom")
+
+    def test_strips_type_field_endpoint_implies_it(self):
+        tmp = _write_body(CUSTOM_POS_BODY)
+        try:
+            calls, _ = _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+        finally:
+            os.unlink(tmp)
+        self.assertNotIn("type", calls[0][2])
+        self.assertEqual(calls[0][2]["unit_price"], "1250.00")
+
+    def test_subposition_routes_to_its_endpoint(self):
+        tmp = _write_body({"type": "KbPositionSubposition",
+                           "text": "Strategie & Design", "show_pos_nr": True})
+        try:
+            calls, _ = _positions_calls(["add", "408", "--file", tmp], {"id": 900})
+        finally:
+            os.unlink(tmp)
+        self.assertEqual(calls[0][1], "/kb_invoice/408/kb_position_subposition")
+
+    def test_carries_parent_id_when_given(self):
+        tmp = _write_body(dict(CUSTOM_POS_BODY, parent_id=900))
+        try:
+            calls, _ = _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+        finally:
+            os.unlink(tmp)
+        self.assertEqual(calls[0][2]["parent_id"], 900)
+
+    def test_omits_parent_id_when_absent(self):
+        tmp = _write_body(CUSTOM_POS_BODY)
+        try:
+            calls, _ = _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+        finally:
+            os.unlink(tmp)
+        self.assertNotIn("parent_id", calls[0][2])
+
+    def test_prints_new_position_id(self):
+        tmp = _write_body(CUSTOM_POS_BODY)
+        try:
+            _, out = _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+        finally:
+            os.unlink(tmp)
+        self.assertIn("777", out)
+        self.assertIn("408", out)
+
+    def test_json_output(self):
+        tmp = _write_body(CUSTOM_POS_BODY)
+        try:
+            def fake_request(self, method, path, params=None, body=None, base=None,
+                             accept="application/json"):
+                return CREATED_POS
+
+            buf = io.StringIO()
+            with patch("bexio.client.BexioClient._request", fake_request), \
+                 patch("bexio.auth.get_token", return_value="FAKE"), \
+                 patch("sys.argv", ["bexio", "--json", "invoices", "positions",
+                                    "add", "408", "--file", tmp]), \
+                 patch("sys.stdout", buf):
+                from bexio.cli import main
+                main()
+            self.assertEqual(json.loads(buf.getvalue())["id"], 777)
+        finally:
+            os.unlink(tmp)
+
+    def test_reads_stdin(self):
+        calls = []
+
+        def fake_request(self, method, path, params=None, body=None, base=None,
+                         accept="application/json"):
+            calls.append((method, path, body))
+            return CREATED_POS
+
+        with patch("bexio.client.BexioClient._request", fake_request), \
+             patch("bexio.auth.get_token", return_value="FAKE"), \
+             patch("sys.stdin", io.StringIO(json.dumps(CUSTOM_POS_BODY))), \
+             patch("sys.argv", ["bexio", "invoices", "positions", "add", "408",
+                                "--file", "-"]), \
+             patch("sys.stdout", io.StringIO()):
+            from bexio.cli import main
+            main()
+        self.assertEqual(calls[0][1], "/kb_invoice/408/kb_position_custom")
+
+    def test_unknown_type_rejected(self):
+        tmp = _write_body({"type": "KbPositionWhatever", "text": "x"})
+        try:
+            with self.assertRaises(SystemExit):
+                _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+        finally:
+            os.unlink(tmp)
+
+    def test_markdown_in_text_rejected(self):
+        tmp = _write_body({"type": "KbPositionCustom",
+                           "text": "**Bold**", "unit_price": "1"})
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                _positions_calls(["add", "408", "--file", tmp], CREATED_POS)
+            self.assertIn("HTML, not Markdown", str(cm.exception))
+        finally:
+            os.unlink(tmp)
+
+
+class TestInvoicePositionsDelete(unittest.TestCase):
+    def test_deletes_custom_at_per_type_endpoint(self):
+        calls, _ = _positions_calls(
+            ["delete", "408", "555", "--type", "custom"], {"success": True})
+        self.assertEqual(calls[0][0], "DELETE")
+        self.assertEqual(calls[0][1], "/kb_invoice/408/kb_position_custom/555")
+
+    def test_subposition_type_routes_to_its_endpoint(self):
+        calls, _ = _positions_calls(
+            ["delete", "408", "900", "--type", "subposition"], {"success": True})
+        self.assertEqual(calls[0][1], "/kb_invoice/408/kb_position_subposition/900")
+
+    def test_prints_confirmation(self):
+        _, out = _positions_calls(
+            ["delete", "408", "555", "--type", "custom"], {"success": True})
+        self.assertIn("555", out)
+        self.assertIn("deleted", out.lower())
+
+    def test_type_is_required(self):
+        with self.assertRaises(SystemExit):
+            _positions_calls(["delete", "408", "555"], {"success": True})
+
+    def test_unknown_type_rejected(self):
+        with self.assertRaises(SystemExit):
+            _positions_calls(
+                ["delete", "408", "555", "--type", "bogus"], {"success": True})

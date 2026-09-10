@@ -15,6 +15,12 @@ from ._common import detect_markdown
 class _PositionBase(BaseModel):
     model_config = ConfigDict(extra="allow")  # Bexio adds read-only fields on GET
 
+    parent_id: int | None = Field(
+        default=None,
+        description="Nest under a subposition (Sammelposition). Honoured only on "
+                    "create — Bexio's position edit endpoint ignores it.",
+    )
+
 
 class KbPositionCustom(_PositionBase):
     """Free-text line item with price + quantity."""

@@ -9,6 +9,7 @@ from bexio.models import (
     KbOrder,
     KbPositionCustom,
     KbPositionDiscount,
+    KbPositionSubposition,
     OrderRepetition,
 )
 
@@ -198,6 +199,36 @@ class TestKbInvoice(unittest.TestCase):
                 "is_valid_from": "2026-05-04", "address": "Bahnhofstrasse 1",
             })
         self.assertIn("address", str(cm.exception))
+
+
+class TestPositionParentId(unittest.TestCase):
+    """`parent_id` nests a position under a subposition (Sammelposition).
+
+    Only honoured by Bexio on create — its position edit endpoint ignores it
+    silently (2026-09-09, Rechnung 407). The field lives on every position
+    type so any of them can become a child.
+    """
+
+    def test_defaults_to_none(self):
+        pos = KbPositionCustom(text="<strong>x</strong>", unit_price="1")
+        self.assertIsNone(pos.parent_id)
+
+    def test_none_is_excluded_from_serialisation(self):
+        pos = KbPositionCustom(text="<strong>x</strong>", unit_price="1")
+        self.assertNotIn("parent_id", pos.model_dump(mode="json", exclude_none=True))
+
+    def test_set_value_serialises(self):
+        pos = KbPositionCustom(text="<strong>x</strong>", unit_price="1", parent_id=42)
+        dumped = pos.model_dump(mode="json", exclude_none=True)
+        self.assertEqual(dumped["parent_id"], 42)
+
+    def test_accepted_on_every_position_type(self):
+        for pos in (
+            KbPositionCustom(text="<strong>x</strong>", unit_price="1", parent_id=7),
+            KbPositionDiscount(text="10%", value="10", parent_id=7),
+            KbPositionSubposition(text="Gruppe", parent_id=7),
+        ):
+            self.assertEqual(pos.parent_id, 7)
 
 
 if __name__ == "__main__":
