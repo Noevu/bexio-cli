@@ -452,9 +452,16 @@ def create_manual_entry(date: str, lines: list[dict], reference_nr: str | None =
     "tax" (code like Vorsteuer8.1 or V00), "text". Debit and credit totals must
     match or nothing is sent. The date is stored verbatim as YYYY-MM-DD — the web
     UI may display a neighbouring day, the API holds the truth.
+
+    A "tax" must NOT sit on the first line: the v3 endpoint silently discards a
+    tax on the anchor line, so put a tax-free payment/counter line first and any
+    taxed line at position 2+. Every write is read back to confirm the tax
+    persisted; if the API drops it the call reports the entry id and line so it
+    can be fixed with edit/delete.
     """
     from bexio.commands.manual_entries import (ManualEntryError, Resolver, build_entry,
-                                               check_balance, normalize_line)
+                                               check_balance, normalize_line,
+                                               assert_tax_position, verify_tax_readback)
 
     try:
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(date or "")):
@@ -462,6 +469,7 @@ def create_manual_entry(date: str, lines: list[dict], reference_nr: str | None =
         parsed = [normalize_line(dict(line)) for line in lines]
         if not parsed:
             raise ManualEntryError("No lines given.")
+        assert_tax_position(parsed)
         check_balance(parsed)
         client = _c()
         if reference_nr:
@@ -475,6 +483,7 @@ def create_manual_entry(date: str, lines: list[dict], reference_nr: str | None =
                     f"Beleg {reference_nr} already exists (API id {dupe.get('id')}).")
         entry = build_entry(parsed, Resolver(client), date=date, reference_nr=reference_nr)
         created = client.post_v3(ME_PATH, body=entry)
+        verify_tax_readback(client, created.get("id"), entry["entries"], 500)
     except ManualEntryError as e:
         return f"REFUSED: {e}"
     return _json(created)

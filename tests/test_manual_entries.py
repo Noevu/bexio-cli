@@ -1,12 +1,14 @@
 """Tests for manual-entries (Sammelbuchungen) commands."""
 
+import copy
 import io
 import unittest
 from argparse import Namespace
 from unittest.mock import patch
 
 from tests.helpers import capture_with_responses
-from bexio.commands.manual_entries import ManualEntryError, assert_tax_is_persistable, normalize_line, parse_line
+from bexio.commands.manual_entries import (
+    ManualEntryError, assert_tax_position, normalize_line, parse_line)
 
 ACCOUNTS = [
     {"id": 24, "account_no": "1030", "name": "Wise CHF", "account_type": "1", "is_active": True},
@@ -66,15 +68,26 @@ ENTRY_OLD = {
 
 
 class FakeClient:
-    """Client stub that answers per path and records every call."""
+    """Client stub that answers per path, records every call, and simulates
+    persistence so the tax read-back check can be exercised.
 
-    def __init__(self, entries=None, accounts=None, taxes=None, currencies=None, posted=None):
-        self.entries = entries if entries is not None else [ENTRY_702, ENTRY_OLD]
+    `drop_tax` mimics the v3 API silently discarding a line tax:
+      - True        → drop the tax on every persisted line
+      - {0, 2, …}   → drop the tax on those 0-based line indexes
+    A persisted create/edit is stored back into `self.entries`, so a read-back
+    (`show`/`list`) sees exactly what the API would return.
+    """
+
+    def __init__(self, entries=None, accounts=None, taxes=None, currencies=None,
+                 posted=None, drop_tax=False):
+        base = entries if entries is not None else [ENTRY_702, ENTRY_OLD]
+        self.entries = copy.deepcopy(base)
         self.accounts = accounts if accounts is not None else ACCOUNTS
         self.taxes = taxes if taxes is not None else TAXES
         self.currencies = currencies if currencies is not None else CURRENCIES
-        self.posted = posted if posted is not None else {"id": 999, "reference_nr": "702"}
+        self.drop_tax = drop_tax
         self.calls = []
+        self._next_id = 999
 
     def get(self, path, params=None):
         self.calls.append(("GET", path))
@@ -92,13 +105,31 @@ class FakeClient:
             return self.entries
         raise AssertionError(f"unexpected GET3 {path}")
 
+    def _drops(self, idx):
+        if self.drop_tax is True:
+            return True
+        if isinstance(self.drop_tax, (set, list, tuple)):
+            return idx in self.drop_tax
+        return False
+
+    def _persist(self, body, entry_id):
+        stored = copy.deepcopy(body)
+        stored["id"] = entry_id
+        for i, line in enumerate(stored.get("entries") or []):
+            if self._drops(i):
+                line["tax_id"] = None
+        self.entries = [e for e in self.entries if e.get("id") != entry_id] + [stored]
+        return stored
+
     def post_v3(self, path, body=None):
         self.calls.append(("POST3", path, body))
-        return self.posted
+        stored = self._persist(body, self._next_id)
+        return {"id": self._next_id, "reference_nr": (body or {}).get("reference_nr")}
 
     def put_v3(self, path, body=None):
         self.calls.append(("PUT3", path, body))
-        return self.posted
+        entry_id = int(path.rstrip("/").split("/")[-1])
+        return self._persist(body, entry_id)
 
     def delete_v3(self, path):
         self.calls.append(("DELETE3", path))
@@ -321,10 +352,8 @@ class TestCreateAndBalance(unittest.TestCase):
     def test_beleg_702_produces_expected_payload(self):
         """The plan's success criterion, at the payload layer.
 
-        It can no longer run through `_create`: that path now REFUSES a taxed line
-        because the API drops the tax (see TestTaxIsRefusedBecauseTheApiDropsIt).
-        `build_entry` stays pure and keeps proving we construct the right payload —
-        so the day Bexio accepts a line tax, only the refusal has to go."""
+        The taxed line (position 2) carries both `tax_id` and `tax_account_id`
+        (the account of the line) — the exact pair a UI-set line holds."""
         from bexio.commands.manual_entries import Resolver, build_entry
 
         lines = [normalize_line(parse_line(s)) for s in self.LINES_702]
@@ -339,18 +368,25 @@ class TestCreateAndBalance(unittest.TestCase):
              "description": "Rückerstattung"},
             {"debit_account_id": None, "credit_account_id": 243, "amount": 765.35,
              "currency_id": 5, "currency_factor": 0.157222, "base_currency_amount": 120.33,
-             "tax_id": 53, "description": "Rückerstattung"},
+             "tax_id": 53, "tax_account_id": 243, "description": "Rückerstattung"},
             {"debit_account_id": 99, "credit_account_id": None, "amount": 0.49,
              "currency_id": 1, "currency_factor": 1.0, "base_currency_amount": 0.49,
              "description": "Kursdifferenz"},
         ])
 
-    def test_create_refuses_the_taxed_beleg_702_lines(self):
-        """Same lines through the real path: refused, nothing sent."""
-        client = FakeClient(entries=[ENTRY_OLD])
-        with self.assertRaises(ManualEntryError):
-            run_handle(create_args(line=self.LINES_702, reference_nr="702"), client)
-        self.assertEqual([c for c in client.calls if c[0] == "POST3"], [])
+    def test_create_sends_a_position_2_tax(self):
+        """A tax on line 2+ is allowed, and sent with tax_id + tax_account_id."""
+        client = FakeClient(entries=[ENTRY_OLD])  # no Beleg-702 duplicate
+        lines = [
+            "debit=1030,amount=119.84,currency=CHF,text=x",
+            "credit=4450,amount=765.35,currency=BRL,rate=0.157222,tax=Vorsteuer8.1,text=x",
+            "debit=6949,amount=0.49,currency=CHF,text=x",
+        ]
+        run_handle(create_args(line=lines), client)
+        body = [c for c in client.calls if c[0] == "POST3"][0][2]
+        self.assertNotIn("tax_id", body["entries"][0])          # anchor untaxed
+        self.assertEqual(body["entries"][1]["tax_id"], 53)
+        self.assertEqual(body["entries"][1]["tax_account_id"], 243)
 
     def test_unbalanced_entry_names_both_sums_and_difference(self):
         from bexio.commands.manual_entries import ManualEntryError
@@ -555,39 +591,81 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestTaxIsRefusedBecauseTheApiDropsIt(unittest.TestCase):
-    """The v3 manual-entries endpoint DISCARDS a line tax without any error.
-    Proven against the live API 2026-08-07 with two throwaway entries (both
-    deleted): sending `tax_id` alone came back `tax_id: None`; sending
-    `tax_id` + `tax_account_id` (the exact pair a UI-set line carries) came
-    back `tax_id: None` too, on POST *and* on PUT. Root cause unknown — Bexio
-    publishes no docs for it.
+class TestTaxPositionRuleAndReadback(unittest.TestCase):
+    """The v3 manual-entries endpoint silently discards a tax on the FIRST
+    (anchor) line only — inferred from 101 existing 2026 bookings, where no
+    position-1 line carries a code and all 42 coded lines sit at position 2+.
 
-    Booking a taxed expense as untaxed is precisely the Kontera-era error this
-    whole pipeline exists to prevent, and it would be invisible. So a tax on a
-    line is REFUSED until the mechanism is understood: no silent half-booking."""
+    So the CLI refuses only a tax on line 1, and PROVES the position rule in
+    operation with a read-back after every write: it re-reads the document and
+    checks each sent tax_id actually persisted. If the API drops one anyway it
+    aborts loudly, names the entry + line, and points at edit/delete."""
 
     def _lines(self, *specs):
         return [normalize_line(parse_line(s)) for s in specs]
 
-    def test_a_line_with_a_tax_is_refused_before_any_request(self):
+    def test_position_1_tax_is_refused_before_any_request(self):
         lines = self._lines("debit=4450,amount=10,currency=CHF,tax=Vorsteuer8.1,text=x",
                             "credit=1030,amount=10,currency=CHF,text=x")
         with self.assertRaises(ManualEntryError) as ctx:
-            assert_tax_is_persistable(lines)
+            assert_tax_position(lines)
         msg = str(ctx.exception)
         self.assertIn("Vorsteuer8.1", msg)
         self.assertIn("1", msg)
 
+    def test_position_2_tax_passes_the_position_check(self):
+        lines = self._lines("credit=1030,amount=10,currency=CHF,text=x",
+                            "debit=4450,amount=10,currency=CHF,tax=Vorsteuer8.1,text=x")
+        assert_tax_position(lines)  # no raise
+
     def test_untaxed_lines_pass(self):
         lines = self._lines("debit=6940,amount=0.01,currency=CHF,text=x",
                             "credit=1030,amount=0.01,currency=CHF,text=x")
-        assert_tax_is_persistable(lines)
+        assert_tax_position(lines)
 
-    def test_create_refuses_and_sends_nothing(self):
+    def test_create_refuses_position_1_tax_and_sends_nothing(self):
         client = FakeClient()
         args = create_args(line=["debit=4450,amount=10,currency=CHF,tax=V00,text=x",
                                  "credit=1030,amount=10,currency=CHF,text=x"])
         with self.assertRaises(ManualEntryError):
             run_handle(args, client)
         self.assertEqual([c for c in client.calls if c[0] == "POST3"], [])
+
+    def test_create_readback_ok_succeeds(self):
+        """Position-2 tax that persists: create posts and the read-back passes."""
+        client = FakeClient(entries=[ENTRY_OLD])  # tax kept (drop_tax=False)
+        run_handle(create_args(line=[
+            "credit=1030,amount=10,currency=CHF,text=x",
+            "debit=4450,amount=10,currency=CHF,tax=Vorsteuer8.1,text=x",
+        ]), client)
+        self.assertTrue([c for c in client.calls if c[0] == "POST3"])
+        # read-back re-reads the ledger after the write
+        self.assertGreaterEqual(
+            len([c for c in client.calls if c[0] == "GET3"
+                 and c[1].startswith("/accounting/manual_entries")]), 1)
+
+    def test_create_readback_dropped_tax_aborts(self):
+        """The API accepts the write but drops the position-2 tax → loud abort
+        naming the entry id, the line, and edit/delete — but the POST happened."""
+        client = FakeClient(entries=[ENTRY_OLD], drop_tax={1})
+        with self.assertRaises(ManualEntryError) as ctx:
+            run_handle(create_args(line=[
+                "credit=1030,amount=10,currency=CHF,text=x",
+                "debit=4450,amount=10,currency=CHF,tax=Vorsteuer8.1,text=x",
+            ]), client)
+        msg = str(ctx.exception)
+        self.assertIn("999", msg)      # created API id
+        self.assertIn("2", msg)        # the affected line
+        self.assertIn("delete", msg.lower())
+        self.assertTrue([c for c in client.calls if c[0] == "POST3"])  # it WAS sent
+
+    def test_edit_readback_dropped_tax_aborts(self):
+        client = FakeClient(entries=[ENTRY_702], drop_tax={1})
+        with self.assertRaises(ManualEntryError) as ctx:
+            run_handle(Namespace(action="edit", id=827, date=None, reference_nr=None,
+                                 line=["debit=1030,amount=10,currency=CHF,text=x",
+                                       "credit=4450,amount=10,currency=CHF,tax=Vorsteuer8.1,text=x"],
+                                 lines_file=None, limit=2000), client)
+        msg = str(ctx.exception)
+        self.assertIn("827", msg)
+        self.assertTrue([c for c in client.calls if c[0] == "PUT3"])

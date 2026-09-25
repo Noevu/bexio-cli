@@ -345,32 +345,63 @@ def base_amount(line: dict) -> float:
     return round(line["amount"] * line["rate"], 2)
 
 
-def assert_tax_is_persistable(lines: list[dict]) -> None:
-    """Refuse any line carrying a tax — the v3 endpoint DISCARDS it silently.
+def assert_tax_position(lines: list[dict]) -> None:
+    """Refuse a tax on the FIRST line only — the v3 endpoint discards it there.
 
-    Verified against the live API on 2026-08-07 with two throwaway entries (both
-    deleted afterwards): a line sent with `tax_id` alone came back `tax_id: None`;
-    sent with `tax_id` + `tax_account_id` — the exact pair a UI-set line carries
-    (`tax_id: 53`, `tax_account_id: 243`) — it came back `tax_id: None` as well, on
-    POST *and* on PUT. No error, no warning, the tax is simply gone. Bexio publishes
-    no documentation for this endpoint, so the mechanism stays unknown.
+    Read-verified against the live account on 2026-09-25: of 101 Sammelbuchungen
+    in 2026 not one position-1 line carries a code, and all 42 coded lines sit at
+    position 2 or later (V00 15×, BZM81 14×, Vorsteuer8.1 8×, U00 5×). The anchor
+    line (position 1, `id:null`) silently comes back `tax_id: None`; every later
+    line keeps its tax. So the tax-free payment/counter line (1050/2000/1030 …)
+    must go first and any taxed line at position 2+.
 
-    Why refuse instead of warn: an expense booked without its input tax is exactly
-    the Kontera-era error this pipeline was rebuilt to prevent, and it leaves no
-    trace to find later. Better no booking than a silently untaxed one. Set the tax
-    in the web UI after creating the untaxed lines, or book the whole entry there.
+    This position rule is inferred, not proven by a write test, so the CLI does
+    not trust it blind: `verify_tax_readback` re-reads the document after every
+    write and aborts if a sent tax did not actually persist.
     """
-    tagged = [(i + 1, l["tax"]) for i, l in enumerate(lines) if l.get("tax")]
-    if not tagged:
+    if lines and lines[0].get("tax"):
+        raise ManualEntryError(
+            f"Tax code {lines[0]['tax']} sits on line 1: the v3 manual-entries "
+            f"endpoint silently discards a tax on the first (anchor) line. Put a "
+            f"tax-free payment or counter line (1050/2000/1030 …) first and move "
+            f"the taxed line to position 2 or later."
+        )
+
+
+def verify_tax_readback(client, entry_id, sent_entries: list[dict], limit: int) -> None:
+    """Prove every tax we sent actually persisted — the position rule is inferred
+    from existing bookings, not proven by a write test, so this read-back is the
+    proof in operation. Re-read the document and compare each sent `tax_id` with
+    the line that came back; a missing or changed one is a loud abort (exit ≠ 0).
+    """
+    sent_taxed = [(i, l["tax_id"]) for i, l in enumerate(sent_entries)
+                  if l.get("tax_id") is not None]
+    if not sent_taxed:
         return
-    detail = ", ".join(f"line {i} ({code})" for i, code in tagged)
+    stored = next((e for e in _fetch(client, limit) if e.get("id") == entry_id), None)
+    if stored is None:
+        raise ManualEntryError(
+            f"Wrote manual entry {entry_id} but could not read it back within the "
+            f"last {limit} entries to verify its tax. Raise --limit and re-check "
+            f"with `bexio manual-entries show {entry_id}`.")
+    stored_lines = stored.get("entries") or []
+    mismatches = []
+    for idx, sent_tax in sent_taxed:
+        got = stored_lines[idx].get("tax_id") if idx < len(stored_lines) else None
+        if got != sent_tax:
+            mismatches.append((idx + 1, sent_tax, got))
+    if not mismatches:
+        return
+    detail = ", ".join(
+        f"line {ln} (sent tax_id {sent}, read back {got if got is not None else 'none'})"
+        for ln, sent, got in mismatches)
     raise ManualEntryError(
-        f"Refusing to send a tax the API drops: {detail}. The v3 manual-entries "
-        f"endpoint discards a line's tax without erroring (verified 2026-08-07, "
-        f"POST and PUT). An untaxed expense booking is worse than none — nothing "
-        f"was sent. Either drop the tax= fields and set the tax in the web UI "
-        f"afterwards, or book this entry in the UI entirely."
-    )
+        f"Tax did NOT persist on manual entry {entry_id}: {detail}. The v3 API "
+        f"accepted the write but dropped the tax — the booking now exists WITHOUT "
+        f"the tax it should carry. Move the taxed line further down and "
+        f"`bexio manual-entries edit {entry_id} --line …`, or "
+        f"`bexio manual-entries delete {entry_id}` and rebook; set the tax in the "
+        f"web UI if it keeps dropping.")
 
 
 def check_balance(lines: list[dict]) -> None:
@@ -398,6 +429,7 @@ def build_entry(lines: list[dict], resolver: Resolver, *, date: str,
         }
         if line["tax"]:
             api_line["tax_id"] = resolver.tax_id(line["tax"], account_no=account_no)
+            api_line["tax_account_id"] = account_id
         api_line["description"] = line["text"]
         api_lines.append(api_line)
     entry = {"type": "manual_compound_entry", "date": date, "entries": api_lines}
@@ -430,7 +462,7 @@ def _create(args, client, json_flag):
     if not DATE_RE.match(str(date)):
         raise ManualEntryError(f"Date {date!r} must be YYYY-MM-DD.")
     lines = _collect_lines(args)
-    assert_tax_is_persistable(lines)
+    assert_tax_position(lines)
     check_balance(lines)
 
     reference_nr = getattr(args, "reference_nr", None)
@@ -445,6 +477,8 @@ def _create(args, client, json_flag):
     resolver = Resolver(client)
     entry = build_entry(lines, resolver, date=date, reference_nr=reference_nr)
     created = client.post_v3(MANUAL_ENTRIES_PATH, body=entry)
+    verify_tax_readback(client, created.get("id"), entry["entries"],
+                        getattr(args, "limit", 500))
     if json_flag:
         print_json(created)
         return
@@ -474,7 +508,8 @@ def _find_entry(client, entry_id, limit):
 
 
 API_LINE_FIELDS = ("debit_account_id", "credit_account_id", "amount", "currency_id",
-                   "currency_factor", "base_currency_amount", "tax_id", "description")
+                   "currency_factor", "base_currency_amount", "tax_id", "tax_account_id",
+                   "description")
 
 
 def strip_line(line: dict) -> dict:
@@ -482,6 +517,7 @@ def strip_line(line: dict) -> dict:
     kept = {k: line.get(k) for k in API_LINE_FIELDS if k in line}
     if kept.get("tax_id") is None:
         kept.pop("tax_id", None)
+        kept.pop("tax_account_id", None)  # no tax → no tax account
     return kept
 
 
@@ -499,7 +535,7 @@ def _edit(args, client, json_flag):
 
     if has_new_lines:
         lines = _collect_lines(args)
-        assert_tax_is_persistable(lines)
+        assert_tax_position(lines)
         check_balance(lines)
         api_lines = build_entry(lines, Resolver(client), date=date or "")["entries"]
     else:
@@ -523,6 +559,7 @@ def _edit(args, client, json_flag):
         body["reference_nr"] = str(new_reference)
 
     updated = client.put_v3(f"{MANUAL_ENTRIES_PATH}/{args.id}", body=body)
+    verify_tax_readback(client, args.id, api_lines, getattr(args, "limit", 2000))
     if json_flag:
         print_json(updated)
         return
